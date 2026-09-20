@@ -17,7 +17,7 @@ audio-fingerprint matching only (`rusty-chromaprint`), not frame hashing.
 #[unsafe(no_mangle)]
 fn android_main(android_app: AndroidApp) {
     setup_android_paths(&android_app);   // JNI: get /data and /cache paths (sets DATA_DIR)
-    app::setup_logger_cache();           // installs DualLogger: logcat + cedinia.log file
+    app::setup_logger_cache();           // installs DualLogger: logcat + one log file per day
     asan_smoketest_if_requested();       // no-op unless CEDINIA_ASAN_SMOKETEST is set
     file_picker_android::init(&android_app); // Load DEX + init JNI
     slint::android::init(android_app.clone()).expect(…);
@@ -27,10 +27,33 @@ fn android_main(android_app: AndroidApp) {
 ```
 
 Logging: on Android `android_logger` would grab the single global `log` slot, so
-czkawka_core's file `WriteLogger` never installs (cedinia.log stays 0 bytes).
-`app.rs::setup_android_logger` installs a `DualLogger` fanning out to BOTH the
-`AndroidLogger` (logcat) and an appended `cedinia.log` in the cache folder, so
+czkawka_core's file `WriteLogger` never installs. `app.rs::setup_android_logger` installs a
+`DualLogger` fanning out to BOTH the `AndroidLogger` (logcat) and an appended file log, so
 log export has real content. Desktop keeps `czkawka_core::setup_logger`.
+
+Log file location and retention (`src/logging.rs`): one file per day, named
+`cedinia_<YYYY-MM-DD>.log`. On Android it lives in the user-visible
+`/storage/emulated/0/Download/cedinia/`; until the user grants `MANAGE_EXTERNAL_STORAGE`
+that folder is not writable, so the logger falls back to `$CACHE_DIR` and the permission
+poll re-opens the Downloads file (`logging::android::retarget_log_file()`) as soon as access
+is granted. `app.rs::prune_stale_logs()` deletes log files untouched for more than 7 days
+from both folders at startup - age comes from the timestamp, not the file name, so a file
+still being appended to survives. Log export reads both folders.
+
+Logging switch: the "Enable logging" setting flips `log::set_max_level(Off)` via
+`logging::set_logging_enabled()`. It is a *process-wide* gate, so it silences every
+`log::*!` site at once (czkawka_core included), not just cedinia's own. It is applied from
+`load_settings()` - i.e. before the first log line of the session - and again from every
+`save_settings()` call, keeping the runtime state in step with the persisted flag.
+Log levels at the call sites: user-visible actions and lifecycle events use `info!`
+(scan start/stop, delete start/finish, opening a compare group, opening a dialog,
+permission changes), per-image or otherwise verbose detail uses `debug!` (score edits,
+viewer navigation, counts and target path lists), rejected/ignored input uses `warn!`
+(a stale index, a second delete while one is running, an image that fails to decode) and
+real failures use `error!`. Messages carry a module prefix (`compare:`, `delete:`,
+`scan {id}:`, `export_logs:`) so one section of a log file can be grepped out.
+
+
 
 **Desktop** (`src/app.rs`):
 ```rust
@@ -54,7 +77,7 @@ cedinia/src/
 ├── bin/cedinia.rs                 # Desktop binary wrapper
 ├── common.rs                      # Column index enums (StrData*, IntData*)
 ├── model.rs                       # FileEntry toggle/count logic
-├── compare.rs                     # Image comparison overlay (cancel token, resize, diff)
+├── compare.rs                     # Image comparison overlay (cancel token, resize, diff, scoring)
 ├── file_actions.rs                # delete_path() (trash on desktop, permanent on Android) + DeleteEvent
 ├── scan_runner.rs                 # Worker thread + ScanRequest/ScanResult
 ├── scanners.rs                    # Tool-specific scan builders
@@ -65,6 +88,8 @@ cedinia/src/
 ├── volumes.rs                     # Storage volume detection
 ├── localizer_cedinia.rs           # flc! macro, LANGUAGE_LIST, apply_language_preference()
 ├── file_picker_android.rs         # JNI + embedded DEX file picker
+├── logging.rs                     # set_logging_enabled() - global Off/on gate for the `log` facade,
+│                                  #   Android log folder (Download/cedinia) + 7 day retention
 ├── callbacks/
 │   ├── callbacks.rs               # Module re-exports
 │   ├── scan.rs                    # wire_scan() – scan/stop/tool-change callbacks

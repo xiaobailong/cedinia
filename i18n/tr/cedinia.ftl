@@ -316,3 +316,6 @@ compare_mode_split = Böl
 compare_mode_overlay = Üst katman
 compare_mode_diff = Değişiklikler
 compare_res_mismatch = Farklı çözünürlükler - "diff" çıktısı hatalı olabilir
+
+logs_enabled = Günlüklemeyi etkinleştir
+logs_enabled_desc = Kapalıyken günlüklere (logcat veya dosya) hiçbir şey yazılmaz

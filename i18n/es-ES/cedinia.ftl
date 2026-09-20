@@ -316,3 +316,6 @@ compare_mode_split = Dividir
 compare_mode_overlay = Superposición
 compare_mode_diff = Diferencia
 compare_res_mismatch = Diferentes resoluciones - las diferencias pueden ser inexactas
+
+logs_enabled = Activar el registro
+logs_enabled_desc = Si está desactivado, no se escribe nada en los registros (logcat o archivo)

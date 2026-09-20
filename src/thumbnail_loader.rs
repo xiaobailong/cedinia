@@ -195,15 +195,19 @@ pub fn collect_thumb_tasks(items: &[FileItem]) -> Vec<(usize, usize, String)> {
 pub fn cleanup_old_thumbnails() {
     let cache_dir = thumbnail_cache_dir();
     let cutoff = SystemTime::now().checked_sub(Duration::from_secs(30 * 24 * 3600)).unwrap_or(SystemTime::UNIX_EPOCH);
+    let mut removed = 0usize;
     if let Ok(entries) = std::fs::read_dir(&cache_dir) {
         for entry in entries.flatten() {
             if let Ok(meta) = entry.metadata()
                 && meta.modified().is_ok_and(|t| t < cutoff)
             {
-                let _ = std::fs::remove_file(entry.path());
+                if std::fs::remove_file(entry.path()).is_ok() {
+                    removed += 1;
+                }
             }
         }
     }
+    log::info!("thumbnail cache: removed {removed} entr(ies) older than 30 days from {}", cache_dir.display());
 }
 
 pub fn spawn_thumbnail_loader(tasks: Vec<(usize, usize, String)>, tx: std::sync::mpsc::Sender<ThumbnailResult>, cancel: Arc<AtomicBool>, scan_id: u32) {

@@ -316,3 +316,6 @@ compare_mode_split = Divisione
 compare_mode_overlay = Sovrapposizione
 compare_mode_diff = Diff
 compare_res_mismatch = Risoluzioni diverse - diff può essere impreciso
+
+logs_enabled = Abilita la registrazione
+logs_enabled_desc = Se disattivato, non viene scritto nulla nei log (logcat o file)

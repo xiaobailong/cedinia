@@ -316,3 +316,6 @@ compare_mode_split = Разделете
 compare_mode_overlay = Покритие
 compare_mode_diff = Разлика
 compare_res_mismatch = Различни резолюции - разликата може да е неточна
+
+logs_enabled = Включване на логове
+logs_enabled_desc = Когато е изключено, нищо не се записва в логовете (logcat или файл)

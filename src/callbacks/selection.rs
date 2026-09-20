@@ -39,7 +39,9 @@ pub(crate) fn wire_selection(window: &MainWindow, delete_tx: std::sync::mpsc::Se
                 return;
             }
             let state = win.global::<AppState>();
+            log::info!("selection: exif clean requested for {n} item(s)");
             state.set_confirm_popup_message(slint::SharedString::from(crate::flc!("confirm_clean_exif", n = n)));
+
             state.set_confirm_popup_action(ConfirmPopupAction::CleanExif);
             state.set_confirm_popup_visible(true);
             let _ = tx.clone();
@@ -57,7 +59,9 @@ pub(crate) fn wire_selection(window: &MainWindow, delete_tx: std::sync::mpsc::Se
                 return;
             }
             let state = win.global::<AppState>();
+            log::info!("selection: delete requested for {n} item(s)");
             state.set_confirm_popup_message(slint::SharedString::from(crate::flc!("confirm_delete_items", n = n)));
+
             state.set_confirm_popup_action(ConfirmPopupAction::Delete);
             state.set_confirm_popup_visible(true);
             let _ = tx.clone();
@@ -167,6 +171,7 @@ pub(crate) fn wire_selection(window: &MainWindow, delete_tx: std::sync::mpsc::Se
 
             let tx = tx.clone();
             let total = files.len();
+            log::info!("gallery: {total} selected image(s) queued for deletion");
             std::thread::spawn(move || {
                 let mut deleted: Vec<String> = Vec::new();
                 let mut errors: Vec<String> = Vec::new();
@@ -183,12 +188,15 @@ pub(crate) fn wire_selection(window: &MainWindow, delete_tx: std::sync::mpsc::Se
                         let _ = tx.send(DeleteEvent::Progress(i + 1, total));
                     }
                 }
+                log::info!("gallery: delete finished ({} deleted, {} error(s))", deleted.len(), errors.len());
                 let _ = tx.send(DeleteEvent::Finished(deleted, errors));
+
             });
         });
     }
     {
         window.global::<AppState>().on_delete_stop_requested(move || {
+            log::info!("gallery: delete stop requested");
             delete_stop.borrow().store(true, Ordering::Relaxed);
         });
     }
@@ -204,7 +212,9 @@ pub(crate) fn wire_selection(window: &MainWindow, delete_tx: std::sync::mpsc::Se
                 return;
             }
             let state = win.global::<AppState>();
+            log::info!("selection: rename requested for {n} item(s)");
             state.set_confirm_popup_message(slint::SharedString::from(crate::flc!("confirm_rename_items", n = n)));
+
             let action = if tool == ActiveTool::BadNames {
                 ConfirmPopupAction::RenameBadNames
             } else {

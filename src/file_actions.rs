@@ -52,6 +52,7 @@ pub(crate) fn execute_delete_selected(win: &MainWindow, tx: std::sync::mpsc::Sen
     }
 
     let total = to_delete.len();
+    log::info!("delete: {total} selected item(s) queued for permanent deletion");
     win.global::<AppState>().set_delete_running(true);
     win.global::<AppState>().set_delete_progress_text(slint::SharedString::from(format!("0 / {total}")));
 
@@ -70,7 +71,9 @@ pub(crate) fn execute_delete_selected(win: &MainWindow, tx: std::sync::mpsc::Sen
                 let _ = tx.send(DeleteEvent::Progress(i + 1, total));
             }
         }
+        log::info!("delete: finished ({} deleted, {} error(s))", deleted_paths.len(), errors.len());
         let _ = tx.send(DeleteEvent::ListDeleteFinished(deleted_paths, errors));
+
     });
 }
 
@@ -98,6 +101,7 @@ pub(crate) fn execute_rename_selected(win: &MainWindow, tx: std::sync::mpsc::Sen
     }
 
     let total = to_rename.len();
+    log::info!("rename: {total} bad-extension item(s) queued for renaming");
     win.global::<AppState>().set_delete_running(true);
     win.global::<AppState>().set_delete_progress_text(slint::SharedString::from(format!("0 / {total}")));
 
@@ -126,7 +130,9 @@ pub(crate) fn execute_rename_selected(win: &MainWindow, tx: std::sync::mpsc::Sen
             }
         }
         let renamed = renamed_indices.len();
+        log::info!("rename: finished ({} renamed, {} error(s))", renamed, errors.len());
         let _ = tx.send(DeleteEvent::ListRenameFinished(ActiveTool::BadExtensions, renamed, errors));
+
     });
 }
 
@@ -154,6 +160,7 @@ pub(crate) fn execute_rename_bad_names(win: &MainWindow, tx: std::sync::mpsc::Se
     }
 
     let total = to_rename.len();
+    log::info!("rename: {total} bad-name item(s) queued for renaming");
     win.global::<AppState>().set_delete_running(true);
     win.global::<AppState>().set_delete_progress_text(slint::SharedString::from(format!("0 / {total}")));
 
@@ -178,7 +185,9 @@ pub(crate) fn execute_rename_bad_names(win: &MainWindow, tx: std::sync::mpsc::Se
                 let _ = tx.send(DeleteEvent::Progress(i + 1, total));
             }
         }
+        log::info!("rename: finished ({} renamed, {} error(s))", renamed_count, errors.len());
         let _ = tx.send(DeleteEvent::ListRenameFinished(ActiveTool::BadNames, renamed_count, errors));
+
     });
 }
 pub(crate) fn execute_clean_exif_selected(win: &MainWindow, tx: std::sync::mpsc::Sender<DeleteEvent>) {
@@ -198,6 +207,7 @@ pub(crate) fn execute_clean_exif_selected(win: &MainWindow, tx: std::sync::mpsc:
     }
 
     let total = to_clean.len();
+    log::info!("exif: {total} item(s) queued for EXIF cleaning");
     win.global::<AppState>().set_delete_running(true);
     win.global::<AppState>().set_delete_progress_text(slint::SharedString::from(format!("0 / {total}")));
 
@@ -214,7 +224,9 @@ pub(crate) fn execute_clean_exif_selected(win: &MainWindow, tx: std::sync::mpsc:
                 let _ = tx.send(DeleteEvent::Progress(i + 1, total));
             }
         }
+        log::info!("exif: finished ({} cleaned, {} error(s))", cleaned_paths.len(), errors.len());
         let _ = tx.send(DeleteEvent::ExifCleanFinished(cleaned_paths, errors));
+
     });
 }
 
@@ -228,7 +240,7 @@ fn vm_file_entry(model: &ModelRc<FileEntry>) -> &VecModel<FileEntry> {
     model.as_any().downcast_ref::<VecModel<FileEntry>>().expect("FileEntry model must be backed by a VecModel")
 }
 
-fn show_delete_errors(win: &MainWindow, errors: &[String]) {
+pub(crate) fn show_delete_errors(win: &MainWindow, errors: &[String]) {
     let mut msg = errors.iter().take(10).cloned().collect::<Vec<_>>().join("\n\n");
     if errors.len() > 10 {
         msg.push_str(&format!("\n\n{} {} {}", crate::flc!("and_more_prefix"), errors.len() - 10, crate::flc!("and_more_suffix")));
@@ -243,6 +255,7 @@ pub(crate) fn handle_delete_event(win: &MainWindow, event: DeleteEvent) {
             win.global::<AppState>().set_delete_progress_text(SharedString::from(format!("{done} / {total}")));
         }
         DeleteEvent::Finished(deleted, errors) => {
+            log::info!("delete: selected items removed from the list ({} deleted, {} error(s))", deleted.len(), errors.len());
             win.global::<AppState>().set_delete_running(false);
 
             if !deleted.is_empty() {
@@ -262,6 +275,7 @@ pub(crate) fn handle_delete_event(win: &MainWindow, event: DeleteEvent) {
             }
         }
         DeleteEvent::ListDeleteFinished(deleted, errors) => {
+            log::info!("delete: list panel updated ({} deleted, {} error(s))", deleted.len(), errors.len());
             win.global::<AppState>().set_delete_running(false);
 
             let del_set: std::collections::HashSet<String> = deleted.iter().cloned().collect();

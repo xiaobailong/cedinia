@@ -316,3 +316,6 @@ compare_mode_split = تقسیم
 compare_mode_overlay = پوشش‌دهی
 compare_mode_diff = تفاوت
 compare_res_mismatch = رزولوشن‌های مختلف - ممکن است اختلاف (diff) نادرست باشد
+
+logs_enabled = فعال‌سازی لاگ‌ها
+logs_enabled_desc = در حالت خاموش هیچ چیزی در لاگ‌ها (logcat یا فایل) نوشته نمی‌شود

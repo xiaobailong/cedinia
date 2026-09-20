@@ -77,6 +77,7 @@ pub fn run_app_with_insets(inset_bottom_px: f32, scale: f32, _unused: ()) {
 }
 
 fn set_tool_model(weak: Weak<MainWindow>, items: Vec<FileItem>, setter: fn(&MainWindow, ModelRc<FileEntry>)) {
+    log::info!("scan result: delivering {} row(s) to the results model", items.len());
     slint::invoke_from_event_loop(move || {
         let win = weak.upgrade().expect("Failed to upgrade app :(");
         setter(&win, make_file_model(items));
@@ -160,6 +161,8 @@ impl ScanResultHandler for GuiHandler {
                         let tool = win.global::<AppState>().get_active_tool();
                         let model = get_model_for_tool(&win, tool);
                         let file_count = (0..model.row_count()).filter(|&i| model.row_data(i).is_some_and(|e| !e.is_header)).count();
+                        log::info!("scan finished (scan_id={id}): {file_count} row(s) shown for the active tool");
+
                         let status = if file_count > 0 {
                             format!("{} {file_count} {}", crate::flc!("found_items_prefix"), crate::flc!("found_items_suffix"))
                         } else {
@@ -184,13 +187,22 @@ fn run_app_inner(
     #[cfg(target_os = "android")] android_app: Option<slint::android::AndroidApp>,
     #[cfg(not(target_os = "android"))] _android_app: Option<()>,
 ) {
+    // `load_settings` also applies the persisted logging switch, so it has to run before the first
+    // log site of the session (the thumbnail cache clean-up thread just below).
+    let loaded_settings = load_settings();
+
     std::thread::spawn(crate::thumbnail_loader::cleanup_old_thumbnails);
 
     let window = MainWindow::new().expect("Failed to create MainWindow");
 
-    let loaded_settings = load_settings();
     crate::localizer_cedinia::apply_language_preference(&loaded_settings.language);
     apply_settings_to_gui(&window, &loaded_settings);
+    log::info!(
+        "run_app_inner: settings applied (language='{}', logging={}, dark_theme={})",
+        loaded_settings.language,
+        loaded_settings.logging_enabled,
+        loaded_settings.use_dark_theme
+    );
 
     #[cfg(target_os = "android")]
     crate::file_picker_android::apply_theme_to_system_bars(loaded_settings.use_dark_theme);
@@ -231,6 +243,13 @@ fn run_app_inner(
     let included_dirs = Rc::new(std::cell::RefCell::new(if saved_included.is_empty() { vec![home_dir()] } else { saved_included }));
     let excluded_dirs: Rc<std::cell::RefCell<Vec<PathBuf>>> = Rc::new(std::cell::RefCell::new(saved_excluded));
     let referenced_dirs: Rc<std::cell::RefCell<Vec<PathBuf>>> = Rc::new(std::cell::RefCell::new(saved_referenced));
+    log::info!(
+        "run_app_inner: directories loaded (included={}, excluded={}, referenced={})",
+        included_dirs.borrow().len(),
+        excluded_dirs.borrow().len(),
+        referenced_dirs.borrow().len()
+    );
+
     let scan_gen: Arc<AtomicU32> = Arc::new(AtomicU32::new(0));
 
     let (thumb_tx, thumb_rx) = std::sync::mpsc::channel::<crate::thumbnail_loader::ThumbnailResult>();
@@ -244,6 +263,8 @@ fn run_app_inner(
         thumb_cancel: Arc::clone(&thumb_cancel),
     };
     let (scan_tx_inner, stop_flag) = start_worker(handler);
+    log::info!("run_app_inner: scan worker thread started");
+
     let scan_tx = Rc::new(scan_tx_inner);
 
     #[cfg(target_os = "android")]
@@ -324,18 +345,31 @@ fn run_app_inner(
             if perm_poll_counter >= 40 {
                 perm_poll_counter = 0;
                 let granted = crate::file_picker_android::check_storage_permission();
+                if win.global::<AppState>().get_storage_permission_granted() != granted {
+                    log::info!("permission poll: storage access granted={granted}");
+                    if granted {
+                        // Download/cedinia just became writable - move the log file there.
+                        crate::logging::android::retarget_log_file();
+                    }
+                }
                 win.global::<AppState>().set_storage_permission_granted(granted);
                 let blocked = !crate::notifications::are_system_notifications_enabled();
+                if win.global::<AppState>().get_system_notifications_blocked() != blocked {
+                    log::info!("permission poll: system notifications blocked={blocked}");
+                }
                 win.global::<AppState>().set_system_notifications_blocked(blocked);
             }
         }
     });
 
+    log::info!("run_app_inner: entering the event loop");
     window.run().expect("Failed to run MainWindow");
+    log::info!("run_app_inner: event loop ended - persisting settings and directories");
 
     let current_settings = collect_settings_from_gui(&window);
     save_settings(&current_settings);
     save_dirs(&included_dirs.borrow(), &excluded_dirs.borrow(), &referenced_dirs.borrow());
+    log::info!("run_app_inner: shutdown complete");
 }
 
 pub(crate) fn setup_logger_cache() {
@@ -354,14 +388,30 @@ pub(crate) fn setup_logger_cache() {
     #[cfg(target_os = "android")]
     setup_android_logger();
 
+    prune_stale_logs();
+
     print_version_mode("Cedinia");
     print_infos_and_warnings(config_cache_path_set_result.infos, config_cache_path_set_result.warnings);
+}
+
+/// Applies the seven day retention window to every folder a log file can end up in - the
+/// Android Downloads folder and the czkawka_core cache folder (which desktop uses and Android
+/// falls back to while storage access is missing).
+fn prune_stale_logs() {
+    if let Some(dir) = crate::logging::android::download_log_dir() {
+        crate::logging::prune_old_logs(&dir);
+    }
+    if let Some(config_cache_path) = czkawka_core::common::config_cache_path::get_config_cache_path() {
+        crate::logging::prune_old_logs(&config_cache_path.cache_folder);
+    }
 }
 
 #[cfg(target_os = "android")]
 struct DualLogger {
     android: android_logger::AndroidLogger,
-    file: std::sync::Mutex<Option<std::fs::File>>,
+    // The slot is shared with the retarget hook, which swaps in a file from the Downloads
+    // folder once the user grants storage access.
+    file: Arc<std::sync::Mutex<Option<std::fs::File>>>,
     level: log::LevelFilter,
 }
 
@@ -401,30 +451,69 @@ impl log::Log for DualLogger {
 fn setup_android_logger() {
     let android = android_logger::AndroidLogger::new(android_logger::Config::default().with_max_level(log::LevelFilter::Debug).with_tag("cedinia"));
 
-    let file = czkawka_core::common::config_cache_path::get_config_cache_path().and_then(|p| {
-        let path = p.cache_folder.join("cedinia.log");
-        let truncate = std::fs::metadata(&path).map_or(false, |m| m.len() > 50 * 1024 * 1024);
-        let mut opts = std::fs::OpenOptions::new();
-        opts.create(true);
-        if truncate {
-            opts.write(true).truncate(true);
-        } else {
-            opts.append(true);
-        }
-        opts.open(&path).ok()
-    });
+    let opened = open_android_log_file();
+    let log_path = opened.as_ref().map(|(path, _)| path.clone());
+    let file = Arc::new(std::sync::Mutex::new(opened.map(|(_, file)| file)));
 
     let logger = DualLogger {
         android,
-        file: std::sync::Mutex::new(file),
+        file: Arc::clone(&file),
         level: log::LevelFilter::Debug,
     };
     if log::set_boxed_logger(Box::new(logger)).is_ok() {
         log::set_max_level(log::LevelFilter::Debug);
+        match &log_path {
+            Some(path) => log::info!("setup_android_logger: DualLogger installed (logcat tag 'cedinia' + \"{}\")", path.display()),
+            None => log::error!("setup_android_logger: DualLogger installed without a writable log file - only logcat output is written"),
+        }
     }
+
+    // Storage access is normally granted after startup, and only then is Download/cedinia
+    // writable - re-open the file so the rest of the session is logged there.
+    crate::logging::android::set_log_retarget_hook(move || {
+        let opened = open_android_log_file();
+        let path = opened.as_ref().map(|(path, _)| path.clone());
+        {
+            let mut slot = file.lock().unwrap_or_else(|e| e.into_inner());
+            *slot = opened.map(|(_, file)| file);
+        }
+        // Logged after the slot is released - writing to it takes the same lock.
+        if let Some(path) = path {
+            log::info!("setup_android_logger: log file is now \"{}\"", path.display());
+        }
+    });
 
     // Route panics into the logger/file without pulling in the log_panics crate.
     std::panic::set_hook(Box::new(|info| {
         log::error!("PANIC: {info}");
     }));
+}
+
+/// Today's log file: `Download/cedinia/cedinia_<date>.log`, or the same name in the private
+/// cache folder while the shared storage is not writable yet.
+#[cfg(target_os = "android")]
+fn open_android_log_file() -> Option<(PathBuf, std::fs::File)> {
+    let cache_folder = czkawka_core::common::config_cache_path::get_config_cache_path()?.cache_folder;
+    let name = crate::logging::android::daily_log_file_name();
+
+    if let Some(dir) = crate::logging::android::download_log_dir()
+        && let Some(opened) = open_log_file(&dir.join(&name))
+    {
+        return Some(opened);
+    }
+    open_log_file(&cache_folder.join(&name))
+}
+
+#[cfg(target_os = "android")]
+fn open_log_file(path: &std::path::Path) -> Option<(PathBuf, std::fs::File)> {
+    // A day of logging stays far below this cap - it only guards against a runaway log loop.
+    let truncate = std::fs::metadata(path).map_or(false, |m| m.len() > 50 * 1024 * 1024);
+    let mut opts = std::fs::OpenOptions::new();
+    opts.create(true);
+    if truncate {
+        opts.write(true).truncate(true);
+    } else {
+        opts.append(true);
+    }
+    opts.open(path).ok().map(|file| (path.to_path_buf(), file))
 }

@@ -37,6 +37,8 @@ REM          并同步写回 Cargo.toml / android/app/build.gradle.kts
 REM  签名  : android/keystore/ 未提交到仓库（just gen_keystores 生成），
 REM          首次构建自动用 keytool 生成自签名密钥库；密码取自环境变量
 REM          CEDINIA_KEYSTORE_PASSWORD（未设置时用 123456，与 build.gradle.kts 兜底一致）
+REM  产物  : 导出到项目根目录，文件名带版本号（cedinia-<版本>.apk / .aab）；
+REM          每次导出成功后会删除根目录下其他版本的安装包，只保留本次产物
 REM ============================================
 
 REM ---- 全局状态变量 ----
@@ -621,6 +623,36 @@ if errorlevel 1 (
     set BUILD_FAILED=1
     goto :eof
 )
+REM 导出成功后清掉历史版本的安装包，根目录只留本次产物
+call :purge_old_packages_current
+goto :eof
+
+REM ============================================
+REM  删除项目根目录下历史版本的安装包（APK/AAB 及 apksigner 的 .idsig 签名）
+REM  %1 / %2 / %3 = 需要保留的文件名（如 cedinia-12.0.6.apk），留空表示该槽位不保留
+REM ============================================
+:purge_old_packages
+set "KEEP_PKG1=%~1"
+set "KEEP_PKG2=%~2"
+set "KEEP_PKG3=%~3"
+set "PURGED_PKG=0"
+for %%f in (cedinia-*.apk cedinia-*.aab cedinia-*.idsig *.apk *.aab *.idsig) do (
+    if exist "%%f" (
+        if /i not "%%~nxf"=="!KEEP_PKG1!" if /i not "%%~nxf"=="!KEEP_PKG2!" if /i not "%%~nxf"=="!KEEP_PKG3!" (
+            for %%i in ("%%f") do echo        删除旧包 %%~nxi  %%~zi 字节
+            del /q "%%f" 2>nul
+            set /a PURGED_PKG+=1
+        )
+    )
+)
+if "!PURGED_PKG!"=="0" echo        无历史版本安装包需要清理
+goto :eof
+
+REM ============================================
+REM  清理历史版本安装包，只保留当前版本号对应的产物
+REM ============================================
+:purge_old_packages_current
+call :purge_old_packages "cedinia-!VERSION_NAME!.apk" "cedinia-!VERSION_NAME!.apk.idsig" "cedinia-!VERSION_NAME!.aab"
 goto :eof
 
 REM ============================================
@@ -697,9 +729,15 @@ echo ============================================
 if exist "target\debug" rmdir /s /q "target\debug" 2>nul
 if exist "target\release\examples" rmdir /s /q "target\release\examples" 2>nul
 if exist "target\release\incremental" rmdir /s /q "target\release\incremental" 2>nul
-if exist "cedinia-*.apk" del /q "cedinia-*.apk" 2>nul
-if exist "*.aab" del /q "*.aab" 2>nul
-rmdir /s /q "build\build_full.log" 2>nul
+REM 根目录下的安装包（含历史版本）与 cargo apk 的中间产物一并清理
+call :purge_old_packages
+for %%d in ("target\debug\apk" "target\release\apk") do (
+    if exist "%%~d" (
+        del /q "%%~d\*.apk" "%%~d\*.idsig" "%%~d\*.unaligned" 2>nul
+        echo        %%~d\ 已清理
+    )
+)
+del /q "build\build_full.log" "build\build_exit.log" 2>nul
 echo       清理完成（target/release/ 已保留）。
 goto :end
 
@@ -743,9 +781,9 @@ echo ============================================
 echo  Desktop 构建成功！
 echo ============================================
 if exist "target\release\cedinia.exe" (
-    for %%f in ("target\release\cedinia.exe") do echo  产物: target\release\cedinia.exe  (%%~zf bytes)
+    for %%f in ("target\release\cedinia.exe") do echo  产物: target\release\cedinia.exe  ^(%%~zf bytes^)
 ) else (
-    echo  产物: target\release\cedinia (或无扩展名可执行文件)
+    echo  产物: target\release\cedinia （或无扩展名可执行文件）
 )
 echo.
 echo  运行方式: cargo run --release
@@ -915,6 +953,8 @@ if exist "!AAB_SRC!" (
     ) else (
         for %%f in ("cedinia-!VERSION_NAME!.aab") do echo  AAB      : %%~nxf  (%%~zf 字节)
         echo  文件位置 : %CD%\cedinia-!VERSION_NAME!.aab
+        REM 导出成功后清掉历史版本的安装包，根目录只留本次产物
+        call :purge_old_packages_current
     )
 ) else (
     echo [提示] AAB 文件未在预期路径找到，请检查 android\app\build\outputs\

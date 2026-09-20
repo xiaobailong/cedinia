@@ -316,3 +316,6 @@ compare_mode_split = 分割
 compare_mode_overlay = 疊加層
 compare_mode_diff = 差異
 compare_res_mismatch = 不同解析度 - 可能導致差異 (diff) 不準確
+
+logs_enabled = 啟用日誌
+logs_enabled_desc = 關閉後任何位置都不會寫入日誌（logcat 或日誌檔）

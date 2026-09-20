@@ -27,6 +27,9 @@ REM        clean all            (深度清理，含 Gradle 缓存)
 REM        clean rust           (仅清理 Rust 编译产物)
 REM        clean android        (仅清理 Android 构建产物)
 REM        clean logs           (仅清理日志文件)
+REM
+REM  产物: 根目录下的 APK/AAB 及其 .idsig 签名（含历史版本），
+REM        以及 target\<profile>\apk\ 下 cargo apk 的中间产物
 REM ============================================
 
 REM ---- 全局状态变量 ----
@@ -122,6 +125,21 @@ echo        target/release/ 编译产物已保留（含增量编译缓存）
 goto :eof
 
 REM ============================================
+REM  仅清理 Android 产物（Gradle 构建 + 根目录安装包，保留 Gradle 缓存）
+REM ============================================
+:clean_android
+echo.
+echo ============================================
+echo  Cedinia Android 产物清理 - %date% %time%
+echo ============================================
+
+call :clean_android_build
+call :clean_output_files
+call :clean_logs
+
+goto :summary
+
+REM ============================================
 REM  清理 Android 构建产物（保留 Gradle 缓存）
 REM ============================================
 :clean_android_build
@@ -188,16 +206,41 @@ REM ============================================
 echo.
 echo [产物] 清理输出文件...
 
+REM ---- 项目根目录下的成品包（含 apksigner 生成的 .idsig 签名）----
 set "FOUND_OUTPUT=0"
-for %%f in (cedinia-*.apk cedinia-*.aab *.apk *.aab) do (
+for %%f in (cedinia-*.apk cedinia-*.aab cedinia-*.idsig *.apk *.aab *.idsig) do (
     if exist "%%f" (
-        for %%i in ("%%f") do echo        删除 %%~nxi  (%%~zi bytes)
+        for %%i in ("%%f") do echo        删除 %%~nxi  ^(%%~zi bytes^)
         del /q "%%f" 2>nul
         set "FOUND_OUTPUT=1"
     )
 )
 if "!FOUND_OUTPUT!"=="0" (
     echo        未找到 APK/AAB 输出文件
+)
+
+REM ---- cargo apk 的中间产物 target\<profile>\apk\ ----
+REM 标准清理保留 target/release/ 的编译产物，但这里只是打包结果，删掉后重新打包即可
+call :clean_apk_intermediates
+goto :eof
+
+REM ============================================
+REM  清理 cargo apk 的中间产物（APK / .idsig / unaligned）
+REM ============================================
+:clean_apk_intermediates
+for %%d in ("target\debug\apk" "target\release\apk") do (
+    if exist "%%~d" (
+        call :get_dir_size "%%~d"
+        echo        %%~d\ 大小: !DIR_SIZE!
+        del /q "%%~d\*.apk" "%%~d\*.idsig" "%%~d\*.unaligned" 2>nul
+        if not exist "%%~d\*.apk" (
+            echo        %%~d\ 已清理
+            call :add_freed "!DIR_BYTES!"
+        ) else (
+            echo        [警告] %%~d\ 部分文件无法删除，可能被占用
+            set CLEAN_FAILED=1
+        )
+    )
 )
 goto :eof
 
@@ -212,8 +255,13 @@ set "LOG_DIR=build"
 if exist "%LOG_DIR%" (
     call :get_dir_size "%LOG_DIR%"
     rmdir /s /q "%LOG_DIR%" 2>nul
-    echo        build\ (日志目录) 已删除
-    call :add_freed "!DIR_BYTES!"
+    if not exist "%LOG_DIR%" (
+        echo        build\ （日志目录） 已删除
+        call :add_freed "!DIR_BYTES!"
+    ) else (
+        REM 本脚本的日志正被 tee 的 PowerShell 持有，删除会失败，下次运行再清理
+        echo        [提示] build\ 下日志正在写入，剩余文件将在下次清理时删除
+    )
 ) else (
     echo        build\ 不存在，跳过
 )
@@ -232,8 +280,8 @@ if exist ".cargo\config.toml.bak" (
     echo        .cargo\config.toml.bak 已删除
 )
 
-REM cargo apk 可能残留的 unaligned APK
-for /r "target" %%f in (*.apk.unaligned) do (
+REM cargo apk 可能残留的 unaligned APK（两种命名都出现过）
+for /r "target" %%f in (*.apk.unaligned *-unaligned.apk) do (
     del /q "%%f" 2>nul
     echo        %%f 已删除
 ) 2>nul

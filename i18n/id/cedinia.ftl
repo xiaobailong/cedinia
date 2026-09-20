@@ -316,3 +316,6 @@ compare_mode_split = Pisahkan
 compare_mode_overlay = Lapisan
 compare_mode_diff = Perbedaan
 compare_res_mismatch = Resolusi yang berbeda - perbedaan yang ditampilkan mungkin tidak akurat
+
+logs_enabled = Aktifkan pencatatan log
+logs_enabled_desc = Jika mati, tidak ada yang ditulis ke log (logcat atau berkas)

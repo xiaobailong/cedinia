@@ -39,11 +39,13 @@ pub(crate) fn wire_permission(window: &MainWindow) {
     #[cfg(target_os = "android")]
     {
         let perm = crate::file_picker_android::check_storage_permission();
+        log::info!("permission: initial storage permission granted={perm}");
         window.global::<AppState>().set_storage_permission_granted(perm);
         if !perm {
             window.global::<AppState>().set_show_permission_popup(true);
         }
         window.global::<AppState>().on_request_storage_permission(move || {
+            log::info!("permission: storage permission requested from the user");
             crate::file_picker_android::request_storage_permission();
         });
     }
@@ -164,6 +166,8 @@ pub(crate) fn wire_cache_info(window: &MainWindow) {
                 let thumb_size = dir_size_recursive(&thumb_dir);
 
                 let app_cache_size = czkawka_core::common::config_cache_path::get_config_cache_path().map_or(0, |p| dir_size_recursive(&p.cache_folder));
+                log::info!("cache info: thumbnails={thumb_size} B, app cache={app_cache_size} B");
+
 
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(win) = weak2.upgrade() {
@@ -187,6 +191,7 @@ pub(crate) fn wire_cache_info(window: &MainWindow) {
                     let _ = std::fs::remove_file(entry.path());
                 }
             }
+            log::info!("cache: thumbnails cleared from {}", thumb_dir.display());
             if let Some(win) = weak.upgrade() {
                 win.global::<AppState>().set_diag_thumbnails_size("0 B".into());
             }
@@ -205,6 +210,7 @@ pub(crate) fn wire_cache_info(window: &MainWindow) {
         let weak = window.as_weak();
         window.global::<AppState>().on_clear_app_cache(move || {
             if let Some(cache_path) = czkawka_core::common::config_cache_path::get_config_cache_path() {
+                log::info!("cache: app cache folder cleared ({})", cache_path.cache_folder.display());
                 let _ = std::fs::remove_dir_all(&cache_path.cache_folder);
             }
             if let Some(win) = weak.upgrade() {
@@ -237,14 +243,23 @@ fn open_dir(path: &Path) {
 }
 
 fn collect_log_files() -> Vec<PathBuf> {
-    let Some(ccp) = czkawka_core::common::config_cache_path::get_config_cache_path() else {
-        return Vec::new();
-    };
+    let mut dirs = Vec::new();
+    if let Some(download_log_dir) = crate::logging::android::download_log_dir() {
+        dirs.push(download_log_dir);
+    }
+    if let Some(config_cache_path) = czkawka_core::common::config_cache_path::get_config_cache_path() {
+        dirs.push(config_cache_path.cache_folder);
+    }
+
     let mut files = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&ccp.cache_folder) {
+    for dir in dirs {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
         for entry in entries.flatten() {
-            // Picks up "cedinia.log" plus the file_rotate suffixes ("cedinia.log.<timestamp>").
-            if entry.file_name().to_string_lossy().starts_with("cedinia.log") {
+            // Logs live in the shared Downloads folder, but an earlier session (or a running
+            // one without storage access) may have left them in the cache folder.
+            if crate::logging::is_log_file(&entry.path()) {
                 files.push(entry.path());
             }
         }
@@ -265,7 +280,7 @@ fn downloads_dir() -> Option<PathBuf> {
     }
 }
 
-// Backup alongside cedinia.log: logd already filters logcat to our own UID.
+// Backup alongside the log files: logd already filters logcat to our own UID.
 #[cfg(target_os = "android")]
 fn dump_logcat(dest: &Path) -> bool {
     let Ok(output) = std::process::Command::new("/system/bin/logcat").args(["-d", "-v", "threadtime"]).output() else {
@@ -317,6 +332,7 @@ pub(crate) fn wire_export_logs(window: &MainWindow) {
             return;
         }
         win.global::<AppState>().set_log_export_running(true);
+        log::info!("export_logs: requested by the user");
 
         let weak2 = win.as_weak();
         std::thread::spawn(move || {
@@ -349,6 +365,7 @@ pub(crate) fn wire_language_change(window: &MainWindow) {
         let win = weak.upgrade().expect("MainWindow dropped in on_apply_language_change");
         let idx = win.global::<GeneralSettings>().get_language_idx() as usize;
         let lang = czkawka_core::localizer_core::LANGUAGE_LIST.get(idx).map_or("en", |l| l.short_name);
+        log::info!("language: switched to '{lang}'");
         crate::localizer_cedinia::apply_language_preference(lang);
         crate::translations::translate_items(&win);
     });
@@ -399,6 +416,8 @@ pub(crate) fn wire_save_settings_now(
     let weak = window.as_weak();
     window.global::<AppState>().on_save_settings_now(move || {
         let win = weak.upgrade().expect("Failed to upgrade app :(");
+        let logging_enabled = win.global::<GeneralSettings>().get_logging_enabled();
+        log::info!("settings: saving on user request (logging_enabled={logging_enabled})");
         let settings = collect_settings_from_gui(&win);
         save_settings(&settings);
         crate::settings::save_dirs(&included_dirs.borrow(), &excluded_dirs.borrow(), &referenced_dirs.borrow());

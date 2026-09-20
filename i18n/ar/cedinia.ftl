@@ -316,3 +316,6 @@ compare_mode_split = تقسيم
 compare_mode_overlay = تراكب
 compare_mode_diff = فرق
 compare_res_mismatch = درجات دقة مختلفة - قد يكون الفرق غير دقيق
+
+logs_enabled = تفعيل السجلات
+logs_enabled_desc = عند الإيقاف لا يُكتب أي شيء في السجلات (logcat أو ملف السجل)

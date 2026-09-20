@@ -11,6 +11,7 @@ mod file_actions;
 #[cfg(target_os = "android")]
 mod file_picker_android;
 pub mod localizer_cedinia;
+pub mod logging;
 mod model;
 mod notifications;
 mod scan_runner;

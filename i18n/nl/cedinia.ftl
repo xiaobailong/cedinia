@@ -316,3 +316,6 @@ compare_mode_split = Opsplitsen
 compare_mode_overlay = Overlay
 compare_mode_diff = Verschil
 compare_res_mismatch = Verschillende resoluties - diff is mogelijk inaccuraat
+
+logs_enabled = Logboekregistratie inschakelen
+logs_enabled_desc = Indien uit wordt er niets naar de logs (logcat of bestand) geschreven

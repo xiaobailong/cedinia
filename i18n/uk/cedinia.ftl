@@ -316,3 +316,6 @@ compare_mode_split = Спліт
 compare_mode_overlay = Накладення
 compare_mode_diff = Різниця
 compare_res_mismatch = Різні роздільності - відмінність може бути неточною
+
+logs_enabled = Увімкнути журналювання
+logs_enabled_desc = Якщо вимкнено, у журнали (logcat або файл) нічого не записується

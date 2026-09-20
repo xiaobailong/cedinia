@@ -316,3 +316,6 @@ compare_mode_split = 분할
 compare_mode_overlay = 오버레이
 compare_mode_diff = 차이
 compare_res_mismatch = 해상도가 서로 다름 - 차이가 부정확할 수 있습니다
+
+logs_enabled = 로그 기록 사용
+logs_enabled_desc = 끄면 로그(logcat 또는 파일)에 아무것도 기록되지 않습니다

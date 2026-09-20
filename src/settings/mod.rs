@@ -88,6 +88,8 @@ pub struct CediniaSettings {
     pub excluded_extensions: String,
     #[serde(default = "ttrue")]
     pub use_dark_theme: bool,
+    #[serde(default = "ttrue")]
+    pub logging_enabled: bool,
 
     #[serde(default = "default_check_method")]
     pub duplicates_check_method: String,
@@ -254,7 +256,10 @@ pub fn load_settings() -> CediniaSettings {
     match std::fs::read_to_string(&path) {
         Ok(json) => match serde_json::from_str::<CediniaSettings>(&json) {
             Ok(s) => {
-                info!("Settings loaded from {}", path.display());
+                // Set before the first log line of the session: every other log site runs after
+                // start-up, so a saved "logging off" keeps the whole session quiet.
+                crate::logging::set_logging_enabled(s.logging_enabled);
+                info!("Settings loaded from {} (logging_enabled={})", path.display(), s.logging_enabled);
                 s
             }
             Err(e) => {
@@ -270,6 +275,11 @@ pub fn load_settings() -> CediniaSettings {
 }
 
 pub fn save_settings(settings: &CediniaSettings) {
+    // Applied here rather than at the call sites so every save path (settings button, directory
+    // picker, shutdown) keeps the runtime switch in sync with what gets written - a session that
+    // just turned logging off goes quiet right after this call.
+    crate::logging::set_logging_enabled(settings.logging_enabled);
+
     let Some(path) = get_config_file() else {
         error!("Cannot determine config path - settings not saved");
         return;
@@ -320,6 +330,7 @@ pub fn apply_settings_to_gui(win: &MainWindow, s: &CediniaSettings) {
     win.global::<GeneralSettings>().set_allowed_extensions(s.allowed_extensions.clone().into());
     win.global::<GeneralSettings>().set_excluded_extensions(s.excluded_extensions.clone().into());
     win.global::<GeneralSettings>().set_use_dark_theme(s.use_dark_theme);
+    win.global::<GeneralSettings>().set_logging_enabled(s.logging_enabled);
 
     let cm_idx = StringComboBoxItems::idx_from_config_name(&s.duplicates_check_method, &items.duplicates_check_method);
     win.global::<DuplicateSettings>().set_check_method(cm_idx as i32);
@@ -420,6 +431,7 @@ pub fn collect_settings_from_gui(win: &MainWindow) -> CediniaSettings {
         allowed_extensions: g.get_allowed_extensions().to_string(),
         excluded_extensions: g.get_excluded_extensions().to_string(),
         use_dark_theme: g.get_use_dark_theme(),
+        logging_enabled: g.get_logging_enabled(),
         duplicates_check_method: items
             .duplicates_check_method
             .get(d.get_check_method() as usize)

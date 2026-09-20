@@ -314,3 +314,6 @@ compare_mode_split = 分割
 compare_mode_overlay = オーバーレイ
 compare_mode_diff = 差分
 compare_res_mismatch = 異なる解像度 - 差分が不正確である可能性があります
+
+logs_enabled = ログ出力を有効にする
+logs_enabled_desc = オフの場合、ログ（logcat やファイル）には何も書き込まれません

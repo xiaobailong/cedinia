@@ -316,3 +316,6 @@ compare_mode_split = Разделить
 compare_mode_overlay = Наложение
 compare_mode_diff = Разница
 compare_res_mismatch = Разные разрешения - разница может быть неточной
+
+logs_enabled = Включить журналирование
+logs_enabled_desc = Если выключено, в журналы (logcat или файл) ничего не записывается

@@ -47,6 +47,7 @@ pub(crate) fn wire_scan(
             let tool = win.global::<AppState>().get_active_tool();
             clear_tool_results(&win, tool);
             let req = build_scan_request(&win, tool, dirs, excluded, refs);
+            log::info!("ui: scan requested ({})", req.kind());
             let _ = tx.send(req);
         });
     }
@@ -57,6 +58,7 @@ pub(crate) fn wire_scan(
         window.global::<AppState>().on_stop_requested(move || {
             let win = weak.upgrade().expect("MainWindow dropped in on_stop_requested");
             stop.store(true, Ordering::Relaxed);
+            log::info!("ui: scan stop requested");
             let _ = tx.send(ScanRequest::Stop);
             win.global::<AppState>().set_scan_state(ScanState::Stopping);
         });

@@ -316,3 +316,6 @@ compare_mode_split = Splitt
 compare_mode_overlay = Overlegg
 compare_mode_diff = Diff
 compare_res_mismatch = Forskjellige oppløsninger - diff kan være unøyaktig
+
+logs_enabled = Aktiver logging
+logs_enabled_desc = Når av, skrives ingenting til loggen (logcat eller fil)

@@ -314,3 +314,6 @@ compare_mode_split = Divisão
 compare_mode_overlay = Camada
 compare_mode_diff = Diff
 compare_res_mismatch = Diferentes resoluções - a diferença pode estar imprecisa
+
+logs_enabled = Ativar registo
+logs_enabled_desc = Quando desativado, nada é escrito nos registos (logcat ou ficheiro)

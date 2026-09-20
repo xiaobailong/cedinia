@@ -316,3 +316,6 @@ compare_mode_split = Împarte
 compare_mode_overlay = Suprapunere
 compare_mode_diff = Dif
 compare_res_mismatch = Diferite rezoluții - diff poate fi inexact
+
+logs_enabled = Activează jurnalizarea
+logs_enabled_desc = Când este oprit, nu se scrie nimic în jurnale (logcat sau fișier)

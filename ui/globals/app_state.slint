@@ -6,6 +6,7 @@ export global GeneralSettings {
     in-out property <bool>   show_notification:           false;
     in-out property <bool>   notify_only_background:      true;
     in-out property <bool>   use_dark_theme:              true;
+    in-out property <bool>   logging_enabled:             true;
 
     in-out property <int>    min_file_size_idx:    0;
     in-out property <[string]> min_file_size_options: ["Brak", "1 KB", "8 KB", "64 KB", "1 MB"];
@@ -289,4 +290,37 @@ export global AppState {
     callback compare_swap();
     callback compare_cancel_load();
     callback compare_compute_diff();
+
+    // Image Compare - fullscreen viewer for a single image of the opened group
+    in-out property <bool>  compare_fullscreen_visible:        false;
+    in-out property <bool>  compare_fullscreen_loading:        false;
+    in-out property <int>   compare_fullscreen_idx:            0;
+    in-out property <image> compare_fullscreen_image;
+    // Bottom delete bar, shown by a long-press in the fullscreen viewer.
+    in-out property <bool>  compare_fullscreen_delete_visible: false;
+
+    callback compare_fullscreen_open(int);   // compare_idx
+    callback compare_fullscreen_close();
+    callback compare_delete_current();
+
+    // Scoring entered in the fullscreen viewer, plus the group-level delete that uses it.
+    in-out property <int>  compare_score_min: 1;
+    in-out property <int>  compare_score_max: 10;
+    in-out property <int>  compare_rated_count: 0;
+    in-out property <bool> compare_all_rated:   false;
+
+    callback compare_score_step(int, int);   // compare_idx, delta (-1/+1 change, 0 keeps the value)
+
+    in-out property <bool>   compare_score_delete_visible:       false;
+    in-out property <bool>   compare_score_delete_running:       false;
+    in-out property <int>    compare_score_delete_limit:         5;
+    in-out property <string> compare_score_delete_limit_text:    "5";
+    in-out property <int>    compare_score_delete_count:         0;
+    in-out property <string> compare_score_delete_progress_text: "";
+
+    callback compare_score_delete_open();
+    callback compare_score_delete_close();
+    callback compare_score_delete_limit_edited(string);
+    callback compare_score_delete_limit_step(int);
+    callback compare_score_delete_confirm();
 }

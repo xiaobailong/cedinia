@@ -836,6 +836,12 @@ export component SettingsScreen {
 
                     CategoryLabel { label: Translations.logs_label_text; }
 
+                    ToggleRow {
+                        label: Translations.logs_enabled_text;
+                        description: Translations.logs_enabled_desc_text;
+                        value <=> GeneralSettings.logging_enabled;
+                    }
+
                     Rectangle {
                         height: 56px;
                         background: CediniaColors.bg_surface;

@@ -316,3 +316,6 @@ compare_mode_split = Chia tách
 compare_mode_overlay = Lớp phủ
 compare_mode_diff = Sự khác biệt
 compare_res_mismatch = Các độ phân giải khác nhau - kết quả so sánh có thể không chính xác
+
+logs_enabled = Bật ghi nhật ký
+logs_enabled_desc = Khi tắt, không có gì được ghi vào nhật ký (logcat hoặc tệp)

@@ -316,3 +316,6 @@ compare_mode_split = Rozdělit
 compare_mode_overlay = Překrytí
 compare_mode_diff = Rozdíl
 compare_res_mismatch = Různá rozlišení - rozdíly mohou být nepřesné
+
+logs_enabled = Povolit protokolování
+logs_enabled_desc = Když je vypnuto, nic se nezapisuje do protokolů (logcat ani soubor)

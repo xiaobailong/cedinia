@@ -23,6 +23,7 @@ android_bridge! {
 }
 
 pub fn init() {
+    log::info!("file picker: JNI bridge initialized");
     FilePicker::set_on_directory_picked(|path, is_include| {
         slint::invoke_from_event_loop(move || {
             crate::app::on_directory_picked(path, is_include);
@@ -56,6 +57,7 @@ pub fn setup_nav_bar() {
 }
 
 pub fn apply_theme_to_system_bars(dark_theme: bool) {
+    log::debug!("file picker: applying dark={dark_theme} to the system bars");
     FilePicker::apply_theme_to_system_bars(dark_theme).log_err("apply_theme_to_system_bars");
 }
 

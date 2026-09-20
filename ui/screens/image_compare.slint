@@ -3,6 +3,7 @@ import { CediniaColors } from "../globals/colors.slint";
 import { AppState } from "../globals/app_state.slint";
 import { Translations } from "../globals/translations.slint";
 import { ScrimDialog } from "../components/scrim_dialog.slint";
+import { TouchButton } from "../components/buttons/touch_button.slint";
 import { ScrollView, Slider } from "std-widgets.slint";
 
 enum CompareMode { Normal, Split, Overlay, Diff }
@@ -39,6 +40,322 @@ component CompareIconBtn inherits Rectangle {
         height: 24px;
         horizontal-alignment: ImageHorizontalAlignment.center;
         vertical-alignment:   ImageVerticalAlignment.center;
+    }
+}
+
+// Single-image viewer - opened by tapping an image of the compare view.  Swipe
+// left/right to walk through the group, long-press for the delete bar at the bottom.
+component CompareFullscreen inherits Rectangle {
+    // Chrome (top bar, info line, delete bar) is hidden by a plain tap.
+    property <bool> chrome_visible: true;
+
+    // Long-press bookkeeping - same pattern as FileRow / GalleryImageCell.
+    property <bool>   lp_fired: false;
+    property <bool>   _lp_active: false;
+    property <bool>   _swiping: false;
+    property <length> _press_x: 0px;
+    property <length> _press_y: 0px;
+
+    property <int>  count: AppState.compare_images.length;
+    property <int>  idx:   AppState.compare_fullscreen_idx;
+    property <bool> idx_valid: idx >= 0 && idx < count;
+
+    // Watch ta.pressed so an up/cancel/gesture-steal always disarms the long-press.
+    property <bool> _ta_pressed_watch: ta.pressed;
+    changed _ta_pressed_watch => {
+        if (!_ta_pressed_watch) {
+            root._lp_active = false;
+            lp_timer.running = false;
+        }
+    }
+
+    background: CediniaColors.image_viewer_bg;
+
+    // Declared before the chrome so the bars above it stay tappable.
+    ta := TouchArea {
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down) {
+                root._press_x = self.mouse-x;
+                root._press_y = self.mouse-y;
+                root._lp_active = true;
+                root._swiping = false;
+                lp_timer.restart();
+                lp_timer.running = true;
+            } else if (e.kind == PointerEventKind.up) {
+                root._lp_active = false;
+                lp_timer.running = false;
+                if (root.lp_fired) {
+                    // The long-press already opened the delete bar - swallow this tap.
+                    root.lp_fired = false;
+                } else if (root._swiping) {
+                    if (self.mouse-x - root._press_x <= -70px) {
+                        if (root.idx + 1 < root.count) { AppState.compare_fullscreen_open(root.idx + 1); }
+                    } else if (root._press_x - self.mouse-x >= 70px) {
+                        if (root.idx > 0) { AppState.compare_fullscreen_open(root.idx - 1); }
+                    }
+                } else if (AppState.compare_fullscreen_delete_visible) {
+                    AppState.compare_fullscreen_delete_visible = false;
+                } else {
+                    root.chrome_visible = !root.chrome_visible;
+                }
+                root._swiping = false;
+            } else if (e.kind == PointerEventKind.cancel) {
+                root._lp_active = false;
+                lp_timer.running = false;
+                root._swiping = false;
+            }
+        }
+        // Fires while the finger is held down and moving.
+        moved => {
+            if (self.mouse-x - root._press_x > 24px || root._press_x - self.mouse-x > 24px) {
+                root._swiping = true;
+            }
+            // Any real movement means the finger is dragging, not long-pressing.
+            if (self.mouse-x - root._press_x > 12px || root._press_x - self.mouse-x > 12px
+                    || self.mouse-y - root._press_y > 12px || root._press_y - self.mouse-y > 12px) {
+                root._lp_active = false;
+                lp_timer.running = false;
+            }
+        }
+    }
+
+    lp_timer := Timer {
+        interval: 500ms;
+        running: false;
+        triggered => {
+            self.running = false;
+            if (!root._lp_active) { return; }
+            root._lp_active = false;
+            root.lp_fired = true;
+            AppState.compare_fullscreen_delete_visible = true;
+        }
+    }
+
+    Image {
+        width: parent.width; height: parent.height;
+        source: AppState.compare_fullscreen_image;
+        image-fit: ImageFit.contain;
+    }
+
+    // Top bar
+    if root.chrome_visible: Rectangle {
+        height: 56px;
+        background: CediniaColors.bg_elevated;
+
+        HorizontalLayout {
+            padding-left: 6px; padding-right: 6px;
+            padding-top: 6px; padding-bottom: 6px;
+            spacing: 8px;
+
+            CompareIconBtn {
+                icon:      @image-url("../../icons/cedinia_compare_back.svg");
+                close_btn: true;
+                clicked => { AppState.compare_fullscreen_close(); }
+            }
+
+            Text {
+                text: (root.idx + 1) + " / " + root.count;
+                color: CediniaColors.text_secondary;
+                font-size: Fonts.body_lg;
+                vertical-alignment: TextVerticalAlignment.center;
+            }
+
+            Rectangle { horizontal-stretch: 1.0; }
+
+            // Which side of the compare view this image is currently assigned to.
+            if root.idx_valid && root.idx == AppState.compare_left_idx: Rectangle {
+                width: 30px; height: 26px;
+                border-radius: 5px;
+                background: CediniaColors.accent;
+                Text {
+                    text: "L";
+                    color: CediniaColors.fg_on_accent;
+                    font-size: Fonts.body; font-weight: Fonts.bold;
+                    horizontal-alignment: TextHorizontalAlignment.center;
+                    vertical-alignment:   TextVerticalAlignment.center;
+                }
+            }
+            if root.idx_valid && root.idx == AppState.compare_right_idx: Rectangle {
+                width: 30px; height: 26px;
+                border-radius: 5px;
+                background: CediniaColors.compare_right_mark;
+                Text {
+                    text: "R";
+                    color: CediniaColors.fg_on_accent;
+                    font-size: Fonts.body; font-weight: Fonts.bold;
+                    horizontal-alignment: TextHorizontalAlignment.center;
+                    vertical-alignment:   TextVerticalAlignment.center;
+                }
+            }
+        }
+
+        Rectangle {
+            x: 0; y: parent.height - 1px;
+            width: parent.width; height: 1px;
+            background: CediniaColors.divider;
+        }
+    }
+
+    // Score controls and file info of the displayed image.  The score is kept by
+    // tapping the number itself, so the default score needs no +/- round trip.
+    if root.chrome_visible && root.idx_valid && !AppState.compare_fullscreen_delete_visible: Rectangle {
+        y: parent.height - self.height;
+        height: fs_bottom.preferred-height;
+        background: CediniaColors.bg_elevated;
+
+        Rectangle {
+            x: 0; y: 0; width: parent.width; height: 1px;
+            background: CediniaColors.divider;
+        }
+
+        fs_bottom := VerticalLayout {
+            spacing: 0px;
+
+            Rectangle {
+                height: 56px;
+
+                HorizontalLayout {
+                    padding-left: 12px; padding-right: 12px;
+                    spacing: 8px;
+
+                    Text {
+                        horizontal-stretch: 1.0;
+                        vertical-alignment: TextVerticalAlignment.center;
+                        text: AppState.compare_images[root.idx].rated
+                            ? Translations.compare_score_progress_text + " " + AppState.compare_rated_count + " / " + root.count
+                            : Translations.compare_score_accept_hint_text;
+                        color: AppState.compare_images[root.idx].rated ? CediniaColors.text_secondary : CediniaColors.accent_light;
+                        font-size: Fonts.caption;
+                        overflow: TextOverflow.elide; wrap: no-wrap;
+                    }
+
+                    // Lower score
+                    Rectangle {
+                        width: 46px; height: 40px;
+                        border-radius: 9px;
+                        background: score_minus_ta.has-hover ? CediniaColors.bg_surface : transparent;
+                        score_minus_ta := TouchArea {
+                            enabled: AppState.compare_images[root.idx].score > AppState.compare_score_min;
+                            clicked => { AppState.compare_score_step(root.idx, -1); }
+                        }
+                        Text {
+                            text: "-";
+                            color: AppState.compare_images[root.idx].score > AppState.compare_score_min
+                                ? CediniaColors.text_primary : CediniaColors.text_disabled;
+                            font-size: Fonts.title; font-weight: Fonts.bold;
+                            horizontal-alignment: TextHorizontalAlignment.center;
+                            vertical-alignment:   TextVerticalAlignment.center;
+                        }
+                    }
+
+                    // The number keeps the score shown, so a 5 needs no +/- round trip
+                    Rectangle {
+                        width: 66px; height: 40px;
+                        border-radius: 9px;
+                        border-width: 1px;
+                        border-color: AppState.compare_images[root.idx].rated ? CediniaColors.accent : CediniaColors.border;
+                        background: score_value_ta.has-hover ? CediniaColors.bg_surface.brighter(0.15) : CediniaColors.bg_surface;
+                        score_value_ta := TouchArea {
+                            clicked => { AppState.compare_score_step(root.idx, 0); }
+                        }
+                        Text {
+                            text: "" + AppState.compare_images[root.idx].score;
+                            color: AppState.compare_images[root.idx].rated ? CediniaColors.text_primary : CediniaColors.text_secondary;
+                            font-size: Fonts.title_lg; font-weight: Fonts.bold;
+                            horizontal-alignment: TextHorizontalAlignment.center;
+                            vertical-alignment:   TextVerticalAlignment.center;
+                        }
+                    }
+
+                    // Higher score
+                    Rectangle {
+                        width: 46px; height: 40px;
+                        border-radius: 9px;
+                        background: score_plus_ta.has-hover ? CediniaColors.bg_surface : transparent;
+                        score_plus_ta := TouchArea {
+                            enabled: AppState.compare_images[root.idx].score < AppState.compare_score_max;
+                            clicked => { AppState.compare_score_step(root.idx, 1); }
+                        }
+                        Text {
+                            text: "+";
+                            color: AppState.compare_images[root.idx].score < AppState.compare_score_max
+                                ? CediniaColors.text_primary : CediniaColors.text_disabled;
+                            font-size: Fonts.title; font-weight: Fonts.bold;
+                            horizontal-alignment: TextHorizontalAlignment.center;
+                            vertical-alignment:   TextVerticalAlignment.center;
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                height: 1px;
+                background: CediniaColors.divider;
+            }
+
+            VerticalLayout {
+                padding-left: 12px; padding-right: 12px;
+                padding-top: 6px; padding-bottom: 8px;
+                spacing: 2px;
+
+                Text {
+                    text: AppState.compare_images[root.idx].name;
+                    color: CediniaColors.text_primary;
+                    font-size: Fonts.body;
+                    horizontal-alignment: TextHorizontalAlignment.center;
+                    overflow: TextOverflow.elide; wrap: no-wrap;
+                }
+                Text {
+                    text: AppState.compare_images[root.idx].size + "  " + AppState.compare_images[root.idx].dims;
+                    color: CediniaColors.text_secondary;
+                    font-size: Fonts.micro;
+                    horizontal-alignment: TextHorizontalAlignment.center;
+                    overflow: TextOverflow.elide; wrap: no-wrap;
+                }
+            }
+        }
+    }
+
+    // Delete bar, opened by a long-press
+    if AppState.compare_fullscreen_delete_visible: Rectangle {
+        y: parent.height - self.height;
+        height: 72px;
+        background: CediniaColors.bg_elevated;
+
+        Rectangle {
+            x: 0; y: 0; width: parent.width; height: 1px;
+            background: CediniaColors.divider;
+        }
+
+        HorizontalLayout {
+            padding: 10px;
+            spacing: 8px;
+
+            Text {
+                horizontal-stretch: 1.0;
+                text: root.idx_valid ? AppState.compare_images[root.idx].name : "";
+                color: CediniaColors.text_secondary;
+                font-size: Fonts.body;
+                overflow: TextOverflow.elide; wrap: no-wrap;
+                vertical-alignment: TextVerticalAlignment.center;
+            }
+
+            TouchButton {
+                label: Translations.delete_text;
+                min_h: 44px;
+                bg: CediniaColors.danger;
+                fg: CediniaColors.fg_on_danger;
+                clicked => { AppState.compare_delete_current(); }
+            }
+        }
+    }
+
+    if AppState.compare_fullscreen_loading: Text {
+        text: Translations.compare_loading_text;
+        color: CediniaColors.text_secondary;
+        font-size: Fonts.subtitle;
+        horizontal-alignment: TextHorizontalAlignment.center;
+        vertical-alignment:   TextVerticalAlignment.center;
     }
 }
 
@@ -117,6 +434,8 @@ export component ImageCompareOverlay inherits Rectangle {
                     icon:      @image-url("../../icons/cedinia_compare_back.svg");
                     close_btn: true;
                     clicked => {
+                        AppState.compare_fullscreen_visible = false;
+                        AppState.compare_fullscreen_delete_visible = false;
                         AppState.compare_visible = false;
                         root.compare_mode = CompareMode.Normal;
                         root.info_visible = false;
@@ -185,6 +504,11 @@ export component ImageCompareOverlay inherits Rectangle {
                         image-fit: ImageFit.contain;
                     }
 
+                    // Tap to review this image on its own; swipe and long-press work there.
+                    TouchArea {
+                        clicked => { if (left_valid) { AppState.compare_fullscreen_open(AppState.compare_left_idx); } }
+                    }
+
                     // Checked indicator (bottom-right corner)
                     if left_valid: Rectangle {
                         x: parent.width - 44px;
@@ -231,6 +555,11 @@ export component ImageCompareOverlay inherits Rectangle {
                         width: parent.width; height: parent.height;
                         source: AppState.compare_right_image;
                         image-fit: ImageFit.contain;
+                    }
+
+                    // Tap to review this image on its own; swipe and long-press work there.
+                    TouchArea {
+                        clicked => { if (right_valid) { AppState.compare_fullscreen_open(AppState.compare_right_idx); } }
                     }
 
                     // Checked indicator (bottom-left corner)
@@ -527,6 +856,42 @@ export component ImageCompareOverlay inherits Rectangle {
             }
         }
 
+        // Scoring summary of the opened group and the entry to the score-based delete.
+        // Hidden until at least one image is scored, so an untouched compare view keeps
+        // its usual layout.
+        if AppState.compare_rated_count > 0: Rectangle {
+            height: 48px;
+            background: CediniaColors.bg_elevated;
+
+            Rectangle {
+                x: 0; y: 0; width: parent.width; height: 1px;
+                background: CediniaColors.divider;
+            }
+
+            HorizontalLayout {
+                padding-left: 12px; padding-right: 12px;
+                spacing: 8px;
+
+                Text {
+                    horizontal-stretch: 1.0;
+                    vertical-alignment: TextVerticalAlignment.center;
+                    text: Translations.compare_score_progress_text + " " + AppState.compare_rated_count + " / " + AppState.compare_images.length;
+                    color: AppState.compare_all_rated ? CediniaColors.success : CediniaColors.text_secondary;
+                    font-size: Fonts.caption;
+                    overflow: TextOverflow.elide; wrap: no-wrap;
+                }
+
+                TouchButton {
+                    label: Translations.compare_delete_below_score_text;
+                    min_h: 36px;
+                    enabled: AppState.compare_all_rated;
+                    bg: CediniaColors.danger;
+                    fg: CediniaColors.fg_on_danger;
+                    clicked => { AppState.compare_score_delete_open(); }
+                }
+            }
+        }
+
         // Thumbnail strip
         Rectangle {
             height: 118px;
@@ -571,6 +936,22 @@ export component ImageCompareOverlay inherits Rectangle {
                                 source: img.thumbnail;
                                 image-fit: ImageFit.contain;
                             }
+
+                            // Score badge (top-left) - shown only on scored images
+                            if img.rated: Rectangle {
+                                x: 4px; y: 4px;
+                                width: 20px; height: 20px;
+                                border-radius: 10px;
+                                background: CediniaColors.accent;
+                                Text {
+                                    text: "" + img.score;
+                                    color: CediniaColors.fg_on_accent;
+                                    font-size: Fonts.micro; font-weight: Fonts.bold;
+                                    horizontal-alignment: TextHorizontalAlignment.center;
+                                    vertical-alignment:   TextVerticalAlignment.center;
+                                }
+                            }
+
 
                             // Checked badge - coloured dot only at this size
                             if img.checked: Rectangle {
@@ -629,6 +1010,199 @@ export component ImageCompareOverlay inherits Rectangle {
         }
     }
 
+    // Score-based delete: the dialog and the feedback it needs.  They live in this
+    // overlay because the results list, with its own delete dialogs, is underneath.
+    if AppState.compare_score_delete_visible: ScrimDialog {
+        x: 0; y: 0;
+        width: parent.width;
+        height: parent.height;
+        z: 130;
+        strong_scrim: true;
+        dismissible: !AppState.compare_score_delete_running;
+        dismissed => { AppState.compare_score_delete_close(); }
+        card_max_width: 360px;
+        side_margin: 32px;
+        card_radius: 14px;
+        card_padding: 20px;
+        card_spacing: 12px;
+        shadow_color: CediniaColors.shadow_xl;
+
+        Text {
+            text: Translations.compare_score_dialog_title_text;
+            color: CediniaColors.danger;
+            font-size: Fonts.title;
+            font-weight: Fonts.bold;
+            horizontal-alignment: TextHorizontalAlignment.center;
+        }
+
+        Text {
+            text: Translations.compare_score_dialog_hint_text;
+            color: CediniaColors.text_secondary;
+            font-size: Fonts.caption;
+            wrap: TextWrap.word-wrap;
+            horizontal-alignment: TextHorizontalAlignment.center;
+        }
+
+        // Limit - typed on the number keyboard, or stepped with the buttons.
+        HorizontalLayout {
+            spacing: 8px;
+
+            Text {
+                horizontal-stretch: 1.0;
+                vertical-alignment: TextVerticalAlignment.center;
+                text: Translations.compare_score_dialog_limit_text + " (" + AppState.compare_score_min + " - " + AppState.compare_score_max + ")";
+                color: CediniaColors.text_secondary;
+                font-size: Fonts.caption;
+                wrap: TextWrap.word-wrap;
+            }
+
+            Rectangle {
+                width: 40px; height: 40px;
+                border-radius: 9px;
+                background: limit_minus_ta.has-hover ? CediniaColors.bg_surface.brighter(0.15) : CediniaColors.bg_surface;
+                limit_minus_ta := TouchArea {
+                    enabled: !AppState.compare_score_delete_running;
+                    clicked => { AppState.compare_score_delete_limit_step(-1); }
+                }
+                Text {
+                    text: "-";
+                    color: CediniaColors.text_primary;
+                    font-size: Fonts.title; font-weight: Fonts.bold;
+                    horizontal-alignment: TextHorizontalAlignment.center;
+                    vertical-alignment:   TextVerticalAlignment.center;
+                }
+            }
+
+            Rectangle {
+                width: 76px; height: 40px;
+                border-radius: 9px;
+                background: CediniaColors.bg_surface;
+                border-width: 1px;
+                border-color: limit_input.has-focus ? CediniaColors.accent : CediniaColors.divider;
+
+                limit_input := TextInput {
+                    x: 8px; y: 6px;
+                    width: parent.width - 16px;
+                    height: parent.height - 12px;
+                    text: AppState.compare_score_delete_limit_text;
+                    input-type: InputType.number;
+                    color: CediniaColors.text_primary;
+                    font-size: Fonts.title_lg;
+                    horizontal-alignment: TextHorizontalAlignment.center;
+                    vertical-alignment:   TextVerticalAlignment.center;
+                    edited => { AppState.compare_score_delete_limit_edited(self.text); }
+                    accepted => { AppState.compare_score_delete_limit_edited(self.text); }
+                }
+            }
+
+            Rectangle {
+                width: 40px; height: 40px;
+                border-radius: 9px;
+                background: limit_plus_ta.has-hover ? CediniaColors.bg_surface.brighter(0.15) : CediniaColors.bg_surface;
+                limit_plus_ta := TouchArea {
+                    enabled: !AppState.compare_score_delete_running;
+                    clicked => { AppState.compare_score_delete_limit_step(1); }
+                }
+                Text {
+                    text: "+";
+                    color: CediniaColors.text_primary;
+                    font-size: Fonts.title; font-weight: Fonts.bold;
+                    horizontal-alignment: TextHorizontalAlignment.center;
+                    vertical-alignment:   TextVerticalAlignment.center;
+                }
+            }
+        }
+
+        Text {
+            text: Translations.compare_score_dialog_count_text + ": " + AppState.compare_score_delete_count;
+            color: AppState.compare_score_delete_count > 0 ? CediniaColors.danger : CediniaColors.text_secondary;
+            font-size: Fonts.body_lg; font-weight: Fonts.semibold;
+            horizontal-alignment: TextHorizontalAlignment.center;
+        }
+
+        if AppState.compare_score_delete_count == 0: Text {
+            text: Translations.compare_score_dialog_none_text;
+            color: CediniaColors.text_secondary;
+            font-size: Fonts.caption;
+            wrap: TextWrap.word-wrap;
+            horizontal-alignment: TextHorizontalAlignment.center;
+        }
+
+        if AppState.compare_score_delete_running: Text {
+            text: AppState.compare_score_delete_progress_text;
+            color: CediniaColors.text_secondary;
+            font-size: Fonts.body_lg;
+            horizontal-alignment: TextHorizontalAlignment.center;
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+
+            TouchButton {
+                label: Translations.cancel_text;
+                horizontal-stretch: 1.0;
+                min_h: 44px;
+                bg: CediniaColors.bg_surface;
+                fg: CediniaColors.text_secondary;
+                enabled: !AppState.compare_score_delete_running;
+                clicked => { AppState.compare_score_delete_close(); }
+            }
+
+            TouchButton {
+                label: Translations.delete_text;
+                horizontal-stretch: 1.0;
+                min_h: 44px;
+                bg: CediniaColors.danger;
+                fg: CediniaColors.fg_on_danger;
+                enabled: AppState.compare_score_delete_count > 0 && !AppState.compare_score_delete_running;
+                clicked => { AppState.compare_score_delete_confirm(); }
+            }
+        }
+    }
+
+
+    // Delete failures from either the viewer or the score-based delete - the results
+    // list shows its own dialog, which this overlay covers.
+    if AppState.delete_errors_visible: ScrimDialog {
+        x: 0; y: 0;
+        width: parent.width;
+        height: parent.height;
+        z: 140;
+        strong_scrim: true;
+        dismissible: false;
+        card_max_width: 400px;
+        side_margin: 32px;
+        card_radius: 14px;
+        card_padding: 20px;
+        card_spacing: 12px;
+        shadow_color: CediniaColors.shadow_xl;
+
+        Text {
+            text: Translations.delete_errors_title_text;
+            color: CediniaColors.warning;
+            font-size: Fonts.label_lg;
+            font-weight: Fonts.semibold;
+            wrap: TextWrap.word-wrap;
+            horizontal-alignment: TextHorizontalAlignment.center;
+        }
+
+        Text {
+            text: AppState.delete_errors_text;
+            color: CediniaColors.text_secondary;
+            font-size: Fonts.caption;
+            wrap: TextWrap.word-wrap;
+        }
+
+        TouchButton {
+            label: Translations.ok_text;
+            min_h: 44px;
+            bg: CediniaColors.bg_surface;
+            fg: CediniaColors.text_secondary;
+            clicked => { AppState.delete_errors_visible = false; }
+        }
+    }
+
+
     // Loading overlay
     if AppState.compare_loading: ScrimDialog {
         x: 0; y: 0;
@@ -672,5 +1246,14 @@ export component ImageCompareOverlay inherits Rectangle {
                 vertical-alignment:   TextVerticalAlignment.center;
             }
         }
+    }
+
+    // Fullscreen single image viewer - above the loading overlay, because deleting an
+    // image reloads the group underneath it.
+    if AppState.compare_fullscreen_visible: CompareFullscreen {
+        x: 0; y: 0;
+        width: parent.width;
+        height: parent.height;
+        z: 110;
     }
 }

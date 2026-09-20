@@ -316,3 +316,6 @@ compare_mode_split = विभाजित
 compare_mode_overlay = ओवरले
 compare_mode_diff = अंतर
 compare_res_mismatch = विभिन्न रेज़ोल्यूशन - अंतर सटीक नहीं हो सकता है।
+
+logs_enabled = लॉगिंग सक्षम करें
+logs_enabled_desc = बंद होने पर लॉग्स (logcat या फ़ाइल) में कुछ नहीं लिखा जाता

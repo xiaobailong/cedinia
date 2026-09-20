@@ -316,3 +316,6 @@ compare_mode_split = Podziel
 compare_mode_overlay = Nakładka
 compare_mode_diff = Różnica
 compare_res_mismatch = Różna rozdzielczość - różnica może być niedokładna
+
+logs_enabled = Włącz logowanie
+logs_enabled_desc = Po wyłączeniu nic nie jest zapisywane do logów (logcat ani plik)

@@ -316,3 +316,6 @@ compare_mode_split = Διαχωρισμός
 compare_mode_overlay = Επικάλυψη
 compare_mode_diff = Διαφορές
 compare_res_mismatch = Διαφορετικές αναλύσεις - η διαφορά μπορεί να είναι ανακριβής
+
+logs_enabled = Ενεργοποίηση καταγραφής
+logs_enabled_desc = Όταν είναι ανενεργό, δεν γράφεται τίποτα στα αρχεία καταγραφής (logcat ή αρχείο)

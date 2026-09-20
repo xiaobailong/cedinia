@@ -82,6 +82,10 @@ export struct CompareImageData {
     flat_idx:  int,
     group_idx: int,
     item_idx:  int,
+    // Score given in the fullscreen viewer (MIN_SCORE..MAX_SCORE in src/compare.rs).
+    score:     int,
+    // False until the user scores the image - gates the "delete below score" entry.
+    rated:     bool,
 }
 export struct ProgressData {
     step_name: string,

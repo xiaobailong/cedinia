@@ -139,6 +139,26 @@ pub enum ScanRequest {
     Stop,
 }
 
+impl ScanRequest {
+    pub(crate) fn kind(&self) -> &'static str {
+        match self {
+            ScanRequest::DuplicateFiles { .. } => "duplicate files",
+            ScanRequest::EmptyFolders { .. } => "empty folders",
+            ScanRequest::SimilarImages { .. } => "similar images",
+            ScanRequest::EmptyFiles { .. } => "empty files",
+            ScanRequest::TemporaryFiles { .. } => "temporary files",
+            ScanRequest::BigFiles { .. } => "big files",
+            ScanRequest::BrokenFiles { .. } => "broken files",
+            ScanRequest::BadExtensions { .. } => "bad extensions",
+            ScanRequest::SameMusic { .. } => "same music",
+            ScanRequest::BadNames { .. } => "bad names",
+            ScanRequest::ExifRemover { .. } => "exif remover",
+            ScanRequest::SimilarVideos { .. } => "similar videos",
+            ScanRequest::Stop => "stop",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ProgressUpdate {
     pub step_name: String,
@@ -210,11 +230,13 @@ fn worker_loop<H: ScanResultHandler + Sync>(req_rx: &Receiver<ScanRequest>, hand
 
     while let Ok(req) = req_rx.recv() {
         if matches!(req, ScanRequest::Stop) {
+            log::info!("scan: stop request received by the worker thread");
             stop_flag.store(true, Ordering::Relaxed);
             continue;
         }
 
         scan_id += 1;
+        log::info!("scan {scan_id}: started ({})", req.kind());
         #[cfg(target_os = "android")]
         let _wakelock = ScanWakeLock::acquire();
 
@@ -356,6 +378,7 @@ fn worker_loop<H: ScanResultHandler + Sync>(req_rx: &Receiver<ScanRequest>, hand
                 handler.on_result(ScanResult::Finished(scan_id));
             }
         }
+        log::info!("scan {scan_id}: worker done");
     }
 }
 

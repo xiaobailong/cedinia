@@ -316,3 +316,6 @@ compare_mode_split = Aufteilen
 compare_mode_overlay = Überlagerung
 compare_mode_diff = Diff
 compare_res_mismatch = Verschiedene Auflösungen - Diff kann ungenau sein
+
+logs_enabled = Protokollierung aktivieren
+logs_enabled_desc = Wenn aus, wird nichts in die Logs (logcat oder Datei) geschrieben

@@ -316,3 +316,6 @@ compare_mode_split = Dela
 compare_mode_overlay = Överlagring
 compare_mode_diff = Skillnad
 compare_res_mismatch = Olika upplösningar - jämförelsen kan bli felaktig
+
+logs_enabled = Aktivera loggning
+logs_enabled_desc = När av skrivs inget till loggarna (logcat eller fil)

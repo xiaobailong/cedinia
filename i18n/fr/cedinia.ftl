@@ -316,3 +316,6 @@ compare_mode_split = Diviser
 compare_mode_overlay = Superposition
 compare_mode_diff = Différence
 compare_res_mismatch = Différentes résolutions - les différences peuvent être inexactes
+
+logs_enabled = Activer la journalisation
+logs_enabled_desc = Si désactivé, rien n'est écrit dans les journaux (logcat ou fichier)

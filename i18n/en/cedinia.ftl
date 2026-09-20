@@ -344,4 +344,15 @@ compare_mode_split = Split
 compare_mode_overlay = Overlay
 compare_mode_diff = Diff
 compare_res_mismatch = Different resolutions - diff may be inaccurate
+compare_score_progress = Scored
+compare_score_accept_hint = Tap the number to keep the score
+compare_delete_below_score = Delete below score
+compare_score_dialog_title = Delete by score
+compare_score_dialog_hint = Images of this group scored below the limit are deleted permanently.
+compare_score_dialog_limit = Score limit
+compare_score_dialog_count = Images to delete
+compare_score_dialog_none = No image is below this limit.
 
+
+logs_enabled = Enable logging
+logs_enabled_desc = When off, nothing is written anywhere (logcat or log file)

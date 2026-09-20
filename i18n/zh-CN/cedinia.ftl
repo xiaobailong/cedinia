@@ -316,3 +316,14 @@ compare_mode_split = 拆分
 compare_mode_overlay = 叠加层
 compare_mode_diff = 差异
 compare_res_mismatch = 分辨率不同 - 差异可能不准确
+compare_score_progress = 已评分
+compare_score_accept_hint = 点数字确认分数
+compare_delete_below_score = 按评分删除
+compare_score_dialog_title = 按评分删除
+compare_score_dialog_hint = 本组中评分低于界限的图像将被永久删除。
+compare_score_dialog_limit = 评分界限
+compare_score_dialog_count = 将删除
+compare_score_dialog_none = 没有图像低于此评分。
+
+logs_enabled = 启用日志
+logs_enabled_desc = 关闭后任何位置都不再写入日志（logcat 或日志文件）

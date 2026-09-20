@@ -73,6 +73,7 @@ pub(crate) fn wire_directories(
         window.global::<AppState>().on_add_include_dir(move |path| {
             let win = weak.upgrade().expect("MainWindow dropped while callback was still live");
             let nb = normalize_path(path.as_str());
+            log::info!("directories: add include dir {}", nb.display());
             if !inc.borrow().contains(&nb) {
                 inc.borrow_mut().push(nb);
             }
@@ -88,6 +89,7 @@ pub(crate) fn wire_directories(
         let refr = referenced_dirs.clone();
         window.global::<AppState>().on_remove_include_dir(move |path| {
             let win = weak.upgrade().expect("MainWindow dropped while callback was still live");
+            log::info!("directories: remove include dir {path}");
             inc.borrow_mut().retain(|p| p.to_string_lossy() != path.as_str());
             refr.borrow_mut().retain(|p| p.to_string_lossy() != path.as_str());
             win.set_included_dirs_model(build_included_model(&inc.borrow(), &refr.borrow()));
@@ -102,6 +104,7 @@ pub(crate) fn wire_directories(
         window.global::<AppState>().on_add_exclude_dir(move |path| {
             let win = weak.upgrade().expect("MainWindow dropped while callback was still live");
             let nb = normalize_path(path.as_str());
+            log::info!("directories: add exclude dir {}", nb.display());
             if !exc.borrow().contains(&nb) {
                 exc.borrow_mut().push(nb);
             }
@@ -116,6 +119,7 @@ pub(crate) fn wire_directories(
         let exc = excluded_dirs.clone();
         window.global::<AppState>().on_remove_exclude_dir(move |path| {
             let win = weak.upgrade().expect("MainWindow dropped while callback was still live");
+            log::info!("directories: remove exclude dir {path}");
             exc.borrow_mut().retain(|p| p.to_string_lossy() != path.as_str());
             win.set_excluded_dirs_model(build_excluded_model(&exc.borrow()));
             refresh_volumes_flags(&win, &inc.borrow(), &exc.borrow());
@@ -132,7 +136,9 @@ pub(crate) fn wire_directories(
             let mut refr_mut = refr.borrow_mut();
             if refr_mut.contains(&p) {
                 refr_mut.retain(|x| x != &p);
+                log::info!("directories: reference removed ({path})");
             } else {
+                log::info!("directories: reference added ({path})");
                 refr_mut.push(p);
             }
             drop(refr_mut);
@@ -240,6 +246,7 @@ pub(crate) fn wire_directories(
             if path.is_empty() {
                 return;
             }
+            log::info!("directories: path entered manually ({path})");
             let nb = normalize_path(path.as_str());
             if win.global::<AppState>().get_path_edit_is_include() {
                 if !inc.borrow().contains(&nb) {
@@ -267,6 +274,12 @@ pub(crate) fn wire_directories(
             let stop = dirs_check_stop.clone();
             window.global::<AppState>().on_start_dirs_check(move || {
                 stop.store(false, Ordering::Relaxed);
+                log::info!(
+                    "directories: size check started (included={}, excluded={}, referenced={})",
+                    inc.borrow().len(),
+                    exc.borrow().len(),
+                    refr.borrow().len()
+                );
                 let inc_snap = inc.borrow().clone();
                 let exc_snap = exc.borrow().clone();
                 let refr_snap = refr.borrow().clone();
@@ -302,6 +315,17 @@ pub(crate) fn wire_directories(
                         let Some(win) = weak.upgrade() else { return };
                         win.global::<AppState>().set_dirs_check_running(false);
                         win.global::<AppState>().set_dirs_check_progress_text(SharedString::from(""));
+                        match &result {
+                            Some(s) => log::info!(
+                                "directories: size check finished (included={}, excluded={}, referenced={}, would_scan={}, processable={})",
+                                s.included_count,
+                                s.excluded_count,
+                                s.referenced_count,
+                                s.would_scan_count,
+                                s.processable_count
+                            ),
+                            None => log::info!("directories: size check aborted"),
+                        }
                         if let Some(s) = result {
                             win.global::<AppState>().set_dirs_check_done(true);
                             win.global::<AppState>().set_dirs_check_no_processable(s.processable_count == 0);
@@ -323,6 +347,7 @@ pub(crate) fn wire_directories(
         }
         {
             window.global::<AppState>().on_stop_dirs_check(move || {
+                log::info!("directories: size check stop requested");
                 dirs_check_stop.store(true, Ordering::Relaxed);
             });
         }

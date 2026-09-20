@@ -168,6 +168,8 @@ pub(crate) fn translate_items(app: &MainWindow) {
     t.set_diagnostics_open_cache_folder_text(flc!("diagnostics_open_cache_folder").into());
     t.set_diagnostics_export_logs_text(flc!("diagnostics_export_logs").into());
     t.set_logs_label_text(flc!("logs_label").into());
+    t.set_logs_enabled_text(flc!("logs_enabled").into());
+    t.set_logs_enabled_desc_text(flc!("logs_enabled_desc").into());
     t.set_logs_export_title_text(flc!("logs_export_title").into());
     t.set_logs_export_saved_text(flc!("logs_export_saved").into());
     t.set_logs_export_failed_text(flc!("logs_export_failed").into());
@@ -276,6 +278,14 @@ pub(crate) fn translate_items(app: &MainWindow) {
     t.set_compare_mode_overlay_text(flc!("compare_mode_overlay").into());
     t.set_compare_mode_diff_text(flc!("compare_mode_diff").into());
     t.set_compare_res_mismatch_text(flc!("compare_res_mismatch").into());
+    t.set_compare_score_progress_text(flc!("compare_score_progress").into());
+    t.set_compare_score_accept_hint_text(flc!("compare_score_accept_hint").into());
+    t.set_compare_delete_below_score_text(flc!("compare_delete_below_score").into());
+    t.set_compare_score_dialog_title_text(flc!("compare_score_dialog_title").into());
+    t.set_compare_score_dialog_hint_text(flc!("compare_score_dialog_hint").into());
+    t.set_compare_score_dialog_limit_text(flc!("compare_score_dialog_limit").into());
+    t.set_compare_score_dialog_count_text(flc!("compare_score_dialog_count").into());
+    t.set_compare_score_dialog_none_text(flc!("compare_score_dialog_none").into());
     t.set_dir_open_folder_text(flc!("dir_open_folder").into());
 
     use std::fmt::Debug;
