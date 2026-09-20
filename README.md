@@ -1,10 +1,4 @@
-<div align="center"><img src="https://github.com/user-attachments/assets/ed6dfeea-a984-49e8-a621-8d6ae521c760" alt="cedinia_logo" width="600" /></div>
-
 Cedinia 是一款 Android 触控友好型 GUI 前端，基于 [Slint](https://slint.dev) 构建，为 [Czkawka Core](https://github.com/qarmin/czkawka) 提供图形界面。当前版本：**12.0.4**。
-
-名称来源于 972 年的 Cedynia 战役，这场胜利对早期波兰国家具有重要意义。
-
-<div align="center"><img src="https://github.com/user-attachments/assets/d1e486a2-1d11-4df8-9fff-0e0af2d003da" alt="cedinia_screenshot" width="1000" /></div>
 
 ## 功能
 
@@ -52,25 +46,11 @@ Cedinia 是一款 Android 触控友好型 GUI 前端，基于 [Slint](https://sl
 - 选择每组中最高/最低分辨率的图像
 - 反转选择
 
-### 国际化
-
-支持 **27 种语言**：阿拉伯语、保加利亚语、捷克语、德语、希腊语、英语、西班牙语、波斯语、法语、印地语、印尼语、意大利语、日语、韩语、荷兰语、挪威语、波兰语、葡萄牙语、巴西葡萄牙语、罗马尼亚语、俄语、瑞典语、土耳其语、乌克兰语、越南语、简体中文、繁体中文。
-
 ### 设置
 
 - **常规** — 缓存开关、隐藏文件过滤、文件大小限制、语言切换、暗色主题、扩展名过滤
 - **工具** — 各扫描工具的详细参数配置（哈希算法、相似度阈值、音乐标签等）
 - **诊断** — 缩略图缓存管理、应用缓存清理、日志导出、文件访问测试
-
-## 安装
-
-从发布页面下载最新的 release APK：https://github.com/qarmin/czkawka/releases
-
-或下载最新的 nightly 构建版本：https://github.com/qarmin/czkawka/releases/download/Nightly/cedinia.apk
-
-目前尚未通过 F-Droid、Google Play 商店或其他应用商店分发，欢迎提出建议和贡献。
-
-暂不计划支持其他操作系统（如 iOS），不过手动移植应该是可行的。
 
 ## 编译 / 环境搭建
 
@@ -93,15 +73,6 @@ Cedinia 是一款 Android 触控友好型 GUI 前端，基于 [Slint](https://sl
 - `CEDINIA_KEYSTORE_PASSWORD` — 签名密钥库密码（可选，默认使用 123456）
 
 首次构建会自动生成签名密钥库。也可参考 GitHub Actions workflow 获取更多详细信息。
-
-## 已知问题
-
-- 由于 Slint 的 bug，键盘支持目前存在多个问题
-- 仅支持竖屏模式和特定的宽高比，可能在某些设备（尤其是平板电脑）上出现问题
-
-## AI 使用说明
-
-由于本项目涉及 Android 部分，开发过程中使用了 AI 辅助，主要用于通过 `jni-rs` / `jni-high` 实现本应用与 Android 之间的桥接代码。相关代码已经过仔细测试。
 
 ## 许可证
 

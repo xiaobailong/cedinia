@@ -1,6 +1,6 @@
 [package]
 name = "cedinia"
-version = "12.0.4"
+version = "12.0.5"
 authors = ["Rafał Mikrut <mikrutrafal@protonmail.com>"]
 edition = "2024"
 rust-version = "1.94.1"
@@ -86,7 +86,9 @@ winit_software = ["slint/renderer-winit-software"]
 #  Android packaging metadata (used by cargo-apk)
 [package.metadata.android]
 package = "io.github.qarmin.cedinia"
-label = "Cedinia"
+# Superseded by [package.metadata.android.application].label below, but kept identical so both
+# spellings resolve to the same name from res/values/strings.xml.
+label = "@string/app_name"
 resources = "res"
 
 [package.metadata.android.sdk]

@@ -3,6 +3,8 @@
 #![allow(clippy::todo)]
 mod app;
 mod callbacks;
+#[cfg(target_os = "android")]
+mod cjk_font;
 pub mod common;
 mod compare;
 mod file_actions;
@@ -52,6 +54,9 @@ fn android_main(android_app: slint::android::AndroidApp) {
     crate::app::setup_logger_cache();
     log::info!("android_main: started");
     asan_smoketest_if_requested();
+    // Before any MainWindow is created - Slint reads SLINT_DEFAULT_FONT only while building its
+    // font collection, which happens once per process.
+    cjk_font::install_system_cjk_font();
     let scale = android_app.config().density().unwrap_or(160) as f32 / 160.0;
     log::info!("android_main: display scale={:.2}", scale);
     log::info!("android_main: initialising jni_high context");

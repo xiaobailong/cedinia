@@ -17,7 +17,9 @@ import { Translations } from "globals/translations.slint";
 export { AppState, GeneralSettings, DuplicateSettings, SimilarImagesSettings, BigFilesSettings, SameMusicSettings, BrokenFilesSettings, BadNamesSettings, TemporaryFilesSettings, SimilarVideosSettings, Translations }
 export component MainWindow inherits Window {
     title: "Cedinia";
-    default-font-family: "Droid Sans Fallback, Noto Sans SC, Noto Sans Hans, Microsoft YaHei, sans-serif";
+    // CJK families first - Slint's Android backend resolves the generic families to Roboto, which
+    // has no Han glyphs. The files behind these names are registered by src/cjk_font.rs.
+    default-font-family: "Noto Sans CJK SC, Noto Sans CJK TC, Droid Sans Fallback, Noto Sans SC, Microsoft YaHei, sans-serif";
     background: CediniaColors.bg_primary;
 
     min-width: 320px;
