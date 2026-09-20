@@ -33,10 +33,6 @@ i18n-embed = { version = "0.16", features = ["fluent-system", "desktop-requester
 i18n-embed-fl = "0.10"
 rust-embed = { version = "8.5", features = ["debug-embed"] }
 
-# Font support for CJK characters
-i-slint-core = "=1.17.0"
-
-
 [target.'cfg(target_os = "android")'.dependencies]
 #slint = { path = "/home/rafal/test/slint/api/rs/slint/", default-features = false, features = [
 #slint = { git = "https://github.com/slint-ui/slint.git", default-features = false, features = [

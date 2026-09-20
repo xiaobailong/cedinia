@@ -13,7 +13,7 @@ pub(crate) fn register_cjk_fonts() {
             match std::fs::read(path) {
                 Ok(data) => {
                     let data: &'static [u8] = Box::leak(data.into_boxed_slice());
-                    i_slint_core::text::FontCache::get().register_font_from_memory(data);
+                    slint::platform::register_font_from_data(data);
                     log::info!("fonts: registered CJK font from {path}");
                     return;
                 }
@@ -38,7 +38,7 @@ pub(crate) fn register_cjk_fonts() {
             match std::fs::read(path) {
                 Ok(data) => {
                     let data: &'static [u8] = Box::leak(data.into_boxed_slice());
-                    i_slint_core::text::FontCache::get().register_font_from_memory(data);
+                    slint::platform::register_font_from_data(data);
                     log::info!("fonts: registered CJK font from {path}");
                     return;
                 }

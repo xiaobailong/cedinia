@@ -871,7 +871,6 @@ dependencies = [
  "czkawka_core",
  "filetime",
  "humansize",
- "i-slint-core",
  "i18n-embed",
  "i18n-embed-fl",
  "image",

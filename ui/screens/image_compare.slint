@@ -100,7 +100,7 @@ export component ImageCompareOverlay inherits Rectangle {
 
                 // Prev group (far left)
                 CompareIconBtn {
-                    icon: @image-url("../../../krokiet/icons/krokiet_compare_prev.svg");
+                    icon: @image-url("../../icons/cedinia_compare_prev.svg");
                     clicked => { AppState.compare_prev_group(); }
                 }
 
@@ -108,13 +108,13 @@ export component ImageCompareOverlay inherits Rectangle {
 
                 // Swap
                 CompareIconBtn {
-                    icon: @image-url("../../../krokiet/icons/krokiet_compare_swap.svg");
+                    icon: @image-url("../../icons/cedinia_compare_swap.svg");
                     clicked => { AppState.compare_swap(); }
                 }
 
                 // Close / Back (center, blue)
                 CompareIconBtn {
-                    icon:      @image-url("../../../krokiet/icons/krokiet_compare_back.svg");
+                    icon:      @image-url("../../icons/cedinia_compare_back.svg");
                     close_btn: true;
                     clicked => {
                         AppState.compare_visible = false;
@@ -125,7 +125,7 @@ export component ImageCompareOverlay inherits Rectangle {
 
                 // Info toggle
                 CompareIconBtn {
-                    icon:   @image-url("../../../krokiet/icons/krokiet_info.svg");
+                    icon:   @image-url("../../icons/cedinia_info.svg");
                     active: root.info_visible;
                     clicked => { root.info_visible = !root.info_visible; }
                 }
@@ -134,7 +134,7 @@ export component ImageCompareOverlay inherits Rectangle {
 
                 // Next group (far right)
                 CompareIconBtn {
-                    icon: @image-url("../../../krokiet/icons/krokiet_compare_next.svg");
+                    icon: @image-url("../../icons/cedinia_compare_next.svg");
                     clicked => { AppState.compare_next_group(); }
                 }
             }
