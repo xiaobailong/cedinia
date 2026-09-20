@@ -52,7 +52,6 @@ component CompareFullscreen inherits Rectangle {
     // Long-press bookkeeping - same pattern as FileRow / GalleryImageCell.
     property <bool>   lp_fired: false;
     property <bool>   _lp_active: false;
-    property <bool>   _swiping: false;
     property <length> _press_x: 0px;
     property <length> _press_y: 0px;
 
@@ -71,50 +70,63 @@ component CompareFullscreen inherits Rectangle {
 
     background: CediniaColors.image_viewer_bg;
 
-    // Declared before the chrome so the bars above it stay tappable.
-    ta := TouchArea {
-        pointer-event(e) => {
-            if (e.kind == PointerEventKind.down) {
-                root._press_x = self.mouse-x;
-                root._press_y = self.mouse-y;
-                root._lp_active = true;
-                root._swiping = false;
-                lp_timer.restart();
-                lp_timer.running = true;
-            } else if (e.kind == PointerEventKind.up) {
-                root._lp_active = false;
-                lp_timer.running = false;
-                if (root.lp_fired) {
-                    // The long-press already opened the delete bar - swallow this tap.
-                    root.lp_fired = false;
-                } else if (root._swiping) {
-                    if (self.mouse-x - root._press_x <= -70px) {
-                        if (root.idx + 1 < root.count) { AppState.compare_fullscreen_open(root.idx + 1); }
-                    } else if (root._press_x - self.mouse-x >= 70px) {
-                        if (root.idx > 0) { AppState.compare_fullscreen_open(root.idx - 1); }
-                    }
-                } else if (AppState.compare_fullscreen_delete_visible) {
-                    AppState.compare_fullscreen_delete_visible = false;
-                } else {
-                    root.chrome_visible = !root.chrome_visible;
-                }
-                root._swiping = false;
-            } else if (e.kind == PointerEventKind.cancel) {
-                root._lp_active = false;
-                lp_timer.running = false;
-                root._swiping = false;
+    // Swipe navigation.  The recognizer has to wrap the touch area rather than sit next to
+    // it: a press is forwarded to the recognizer's children only after a 100ms delay, and
+    // the delayed press is replayed into the recognizer's own children, so a recognizer
+    // declared as a sibling would never see it.  It also has to be declared before the
+    // chrome, because once a drag passes the built-in 8 px threshold the recognizer stops
+    // forwarding pointer events - declared after the chrome it would swallow every press on
+    // the chrome buttons.  Both directions go through the same signed travel between the
+    // pressed and the released position, so dragging leftwards shows the next image.
+    sgr := SwipeGestureHandler {
+        handle-swipe-left: true;
+        handle-swipe-right: true;
+        swiped => {
+            if (self.current-position.x - self.pressed-position.x <= -60px) {
+                if (root.idx + 1 < root.count) { AppState.compare_fullscreen_open(root.idx + 1); }
+            } else if (self.current-position.x - self.pressed-position.x >= 60px) {
+                if (root.idx > 0) { AppState.compare_fullscreen_open(root.idx - 1); }
             }
         }
-        // Fires while the finger is held down and moving.
-        moved => {
-            if (self.mouse-x - root._press_x > 24px || root._press_x - self.mouse-x > 24px) {
-                root._swiping = true;
+
+        // Fills the viewer, so a tap anywhere on the image toggles the chrome and a
+        // long-press opens the delete bar.
+        ta := TouchArea {
+            pointer-event(e) => {
+                if (e.kind == PointerEventKind.down) {
+                    root._press_x = self.mouse-x;
+                    root._press_y = self.mouse-y;
+                    root._lp_active = true;
+                    lp_timer.restart();
+                    lp_timer.running = true;
+                } else if (e.kind == PointerEventKind.up) {
+                    root._lp_active = false;
+                    lp_timer.running = false;
+                    if (root.lp_fired) {
+                        // The long-press already opened the delete bar - swallow this tap.
+                        root.lp_fired = false;
+                    } else if (AppState.compare_fullscreen_delete_visible) {
+                        AppState.compare_fullscreen_delete_visible = false;
+                    } else {
+                        root.chrome_visible = !root.chrome_visible;
+                    }
+                } else if (e.kind == PointerEventKind.cancel) {
+                    // A recognised swipe ends the press here instead of with an up, so the
+                    // flags that up would have cleared have to be cleared here as well - a
+                    // stale lp_fired would otherwise swallow the next tap.
+                    root._lp_active = false;
+                    root.lp_fired = false;
+                    lp_timer.running = false;
+                }
             }
-            // Any real movement means the finger is dragging, not long-pressing.
-            if (self.mouse-x - root._press_x > 12px || root._press_x - self.mouse-x > 12px
-                    || self.mouse-y - root._press_y > 12px || root._press_y - self.mouse-y > 12px) {
-                root._lp_active = false;
-                lp_timer.running = false;
+            // Fires while the finger is held down and moving.
+            moved => {
+                // Any real movement means the finger is dragging, not long-pressing.
+                if (self.mouse-x - root._press_x > 12px || root._press_x - self.mouse-x > 12px
+                        || self.mouse-y - root._press_y > 12px || root._press_y - self.mouse-y > 12px) {
+                    root._lp_active = false;
+                    lp_timer.running = false;
+                }
             }
         }
     }
@@ -137,8 +149,9 @@ component CompareFullscreen inherits Rectangle {
         image-fit: ImageFit.contain;
     }
 
-    // Top bar
+    // Top bar - needs an explicit y, otherwise the default geometry centres it in the viewer
     if root.chrome_visible: Rectangle {
+        x: 0; y: 0;
         height: 56px;
         background: CediniaColors.bg_elevated;
 
