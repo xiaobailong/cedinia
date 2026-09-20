@@ -17,7 +17,7 @@ crate-type = ["cdylib", "rlib"]
 
 
 [dependencies]
-czkawka_core = { version = "12.0.2", path = "../czkawka_core" }
+czkawka_core = "12.0.2"
 crossbeam-channel = "0.5"
 log = "0.4"
 humansize = "2.1"
@@ -32,6 +32,9 @@ xxhash-rust = { version = "0.8", features = ["xxh3"] }
 i18n-embed = { version = "0.16", features = ["fluent-system", "desktop-requester"] }
 i18n-embed-fl = "0.10"
 rust-embed = { version = "8.5", features = ["debug-embed"] }
+
+# Font support for CJK characters
+i-slint-core = "=1.17.0"
 
 
 [target.'cfg(target_os = "android")'.dependencies]
@@ -146,5 +149,6 @@ keystore_password = "TO_REPLACE_KEYSTORE_PASSWORD"
 path = "android/keystore/release.keystore"
 keystore_password = "TO_REPLACE_KEYSTORE_PASSWORD"
 
-[lints]
-workspace = true
+# Standalone build: workspace lints removed. See ../czkawka/Cargo.toml for original rules.
+# [lints]
+# workspace = true

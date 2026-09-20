@@ -1,0 +1,6 @@
+# Cargo 国内镜像配置（sparse HTTP 协议，不走 git 排队）
+[source.crates-io]
+replace-with = 'tuna'
+
+[source.tuna]
+registry = "sparse+https://mirrors.tuna.tsinghua.edu.cn/crates.io-index/"

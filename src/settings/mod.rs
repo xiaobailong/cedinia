@@ -36,7 +36,7 @@ fn default_max_file_size() -> String {
     "unlimited".to_string()
 }
 fn default_language() -> String {
-    "auto".to_string()
+    "zh-CN".to_string()
 }
 fn default_hash_alg() -> String {
     "mean".to_string()

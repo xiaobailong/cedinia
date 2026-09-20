@@ -1,0 +1,32 @@
+# Rust build artifacts
+/target
+
+# Build logs and temporary output
+/build
+
+# Cargo.lock is committed (this is an application, not a library)
+# Cargo.lock
+
+# Android
+android/keystore/*.keystore
+android/app/build/
+android/.gradle/
+android/app/src/main/jniLibs/
+
+# Generated packages
+*.aab
+*.apk
+
+# Profiling
+*.profraw
+*.profdata
+
+# IDE
+.idea/
+*.iml
+
+# Editor / OS
+*~
+*#
+Thumbs.db
+.DS_Store

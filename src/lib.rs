@@ -8,6 +8,7 @@ mod compare;
 mod file_actions;
 #[cfg(target_os = "android")]
 mod file_picker_android;
+mod fonts;
 pub mod localizer_cedinia;
 mod model;
 mod notifications;
