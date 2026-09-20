@@ -186,8 +186,6 @@ fn run_app_inner(
 ) {
     std::thread::spawn(crate::thumbnail_loader::cleanup_old_thumbnails);
 
-    crate::fonts::register_cjk_fonts();
-
     let window = MainWindow::new().expect("Failed to create MainWindow");
 
     let loaded_settings = load_settings();
