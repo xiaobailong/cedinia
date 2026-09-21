@@ -31,14 +31,22 @@ REM        build desktop        (桌面版 Release 构建)
 REM        build clean          (清理构建产物)
 REM        build check          (仅检查构建环境)
 REM        build ... no-bump    (本次构建不递增版本号)
+REM        build ... no-release (本次构建不发布 GitHub Release，只产出 APK)
+REM        build publish        (用根目录已有的 cedinia-<版本>.apk 只走发布流程)
 REM
 REM  版本号: 读取 Cargo.toml 的 package version，每次 Android 构建 patch 自增，
-REM          并同步写回 Cargo.toml / android/app/build.gradle.kts
+REM          并同步写回 Cargo.toml / android/app/build.gradle.kts。
+REM          界面里的版本号直接取 cargo 的 CARGO_PKG_VERSION，所以构建后自动同步
 REM  签名  : android/keystore/ 未提交到仓库（just gen_keystores 生成），
 REM          首次构建自动用 keytool 生成自签名密钥库；密码取自环境变量
 REM          CEDINIA_KEYSTORE_PASSWORD（未设置时用 123456，与 build.gradle.kts 兜底一致）
 REM  产物  : 导出到项目根目录，文件名带版本号（cedinia-<版本>.apk / .aab）；
 REM          每次导出成功后会删除根目录下其他版本的安装包，只保留本次产物
+REM  发布  : Android Release 构建成功后自动执行 GitHub Release 流程
+REM          （提交版本号变更 -> 打标签 v<版本> -> 推送分支与标签 ->
+REM            gh release create 并上传 APK）。
+REM          需要 GitHub CLI（gh）已安装且已登录；缺少 gh、未登录、或 Debug 构建
+REM          会自动跳过，加 no-release 可强制不发布
 REM ============================================
 
 REM ---- 全局状态变量 ----
@@ -80,6 +88,14 @@ if "%PROXY_AVAILABLE%"=="1" (
     set "HTTPS_PROXY=http://%PROXY_HOST%:%PROXY_PORT%"
 )
 
+REM ---- GitHub CLI（发布 Release 用）----
+REM      优先取 PATH 上的 gh；装在 "%ProgramFiles%\GitHub CLI" 但没进 PATH 时用绝对路径
+set "GH_EXE="
+for /f "delims=" %%g in ('where gh 2^>nul') do if not defined GH_EXE set "GH_EXE=%%g"
+if not defined GH_EXE if exist "%ProgramFiles%\GitHub CLI\gh.exe" set "GH_EXE=%ProgramFiles%\GitHub CLI\gh.exe"
+REM 发布环节不让 git 停下来等凭据输入，失败就直接报错
+set "GIT_TERMINAL_PROMPT=0"
+
 REM 不合并方案：各组件的 bin 目录分别加入 PATH
 set "PATH=%JAVA_HOME%\bin;%RUST_PORTABLE%\rustc\bin;%RUST_PORTABLE%\cargo\bin;%RUST_PORTABLE%\rustfmt-preview\bin;%RUST_PORTABLE%\rust-analyzer-preview\bin;%RUST_PORTABLE%\clippy-preview\bin;%RUST_PORTABLE%\llvm-tools-preview\bin;%CARGO_HOME%\bin;%ANDROID_HOME%\platform-tools;%PATH%"
 
@@ -103,8 +119,11 @@ if /i "%~1"=="clean"         goto :clean
 if /i "%~1"=="check"         goto :check_only
 if "%~1"==""                 goto :android_build
 if /i "%~1"=="no-bump"       goto :android_build
+if /i "%~1"=="no-release"    goto :android_build
+if /i "%~1"=="publish"       goto :publish_only
 echo [错误] 未知参数: %~1
-echo        可用参数: (无) android android-debug android-aab desktop clean check
+echo        可用参数: (无) android android-debug android-aab desktop clean check publish
+echo                  no-bump（不递增版本号） no-release（不发布 GitHub Release）
 set BUILD_FAILED=1
 goto :end
 
@@ -719,6 +738,136 @@ if "%PROXY_AVAILABLE%"=="1" (
 goto :eof
 
 REM ============================================
+REM  发布 GitHub Release
+REM  提交版本号变更 -> 打标签 v<版本> -> 推送分支与标签 -> gh release 上传 APK
+REM  传参 %* 用于识别 no-release；Debug 构建、缺少 gh、未登录时自动跳过（不算失败）
+REM ============================================
+:publish_github_release
+REM 与 :bump_version 同理：'call :label' 清空子例程里的 %*，所以参数必须显式透传
+set "NO_RELEASE=0"
+for %%a in (--log %*) do if /i "%%~a"=="no-release" set "NO_RELEASE=1"
+
+if "!NO_RELEASE!"=="1" (
+    echo        [发布] 指定了 no-release，跳过 GitHub Release
+    goto :eof
+)
+if /i not "!BUILD_MODE!"=="release" (
+    echo        [发布] !BUILD_MODE! 构建不发布（只有 Release APK 会创建 GitHub Release）
+    goto :eof
+)
+if not defined GH_EXE (
+    echo [警告] 未找到 GitHub CLI（gh），跳过发布
+    echo        安装: winget install GitHub.cli    只构建不发布: build ... no-release
+    goto :eof
+)
+"!GH_EXE!" auth status >nul 2>&1
+if errorlevel 1 (
+    echo [警告] gh 未登录，跳过发布
+    echo        登录: "!GH_EXE!" auth login
+    goto :eof
+)
+
+set "REL_TAG=v!VERSION_NAME!"
+set "REL_ASSET=cedinia-!VERSION_NAME!.apk"
+if not exist "!REL_ASSET!" (
+    echo [错误] 找不到要发布的产物 !REL_ASSET!
+    set BUILD_FAILED=1
+    goto :eof
+)
+
+REM ---- 先提交版本号变更（no-bump 构建通常没有改动，不会产生提交）----
+git add Cargo.toml android/app/build.gradle.kts 2>nul
+if exist "Cargo.lock" git add Cargo.lock 2>nul
+git diff --cached --quiet
+if errorlevel 1 (
+    set "STEP_NAME=git commit"
+    git commit -m "chore: bump to !REL_TAG!" >nul
+    if errorlevel 1 (
+        echo [错误] 提交版本号变更失败
+        set BUILD_FAILED=1
+        goto :eof
+    )
+    echo        已提交版本号: !VERSION_NAME!
+)
+
+REM ---- 打标签（已存在则复用，便于重跑本流程）----
+git rev-parse -q --verify "refs/tags/!REL_TAG!" >nul 2>&1
+if errorlevel 1 (
+    set "STEP_NAME=git tag"
+    git tag -a "!REL_TAG!" -m "Cedinia !REL_TAG!"
+    if errorlevel 1 (
+        echo [错误] 打标签 !REL_TAG! 失败
+        set BUILD_FAILED=1
+        goto :eof
+    )
+)
+
+set "STEP_NAME=git push"
+git push origin HEAD
+if errorlevel 1 (
+    echo [错误] 推送分支失败（检查 SSH/凭据；只想构建可加 no-release）
+    set BUILD_FAILED=1
+    goto :eof
+)
+git push origin "!REL_TAG!"
+if errorlevel 1 (
+    echo [错误] 推送标签 !REL_TAG! 失败
+    set BUILD_FAILED=1
+    goto :eof
+)
+
+REM ---- 创建 / 更新 Release 并上传 APK ----
+> "build\release_notes.md" echo Cedinia !REL_TAG!
+>> "build\release_notes.md" echo.
+>> "build\release_notes.md" echo Android touch-friendly GUI for Czkawka Core, built with Slint.
+>> "build\release_notes.md" echo.
+>> "build\release_notes.md" echo - cedinia-!VERSION_NAME!.apk - arm64-v8a, versionCode !VERSION_CODE!
+>> "build\release_notes.md" echo - Install: adb install -r cedinia-!VERSION_NAME!.apk
+
+set "GH_RC=0"
+"!GH_EXE!" release view "!REL_TAG!" >nul 2>&1
+if errorlevel 1 (
+    set "STEP_NAME=gh release create"
+    "!GH_EXE!" release create "!REL_TAG!" "!REL_ASSET!" --title "Cedinia !REL_TAG!" --notes-file "build\release_notes.md"
+    set "GH_RC=!ERRORLEVEL!"
+) else (
+    set "STEP_NAME=gh release upload"
+    "!GH_EXE!" release upload "!REL_TAG!" "!REL_ASSET!" --clobber
+    set "GH_RC=!ERRORLEVEL!"
+)
+if not "!GH_RC!"=="0" (
+    echo [错误] GitHub Release 发布失败（手动重试: "!GH_EXE!" release create !REL_TAG! !REL_ASSET!）
+    set BUILD_FAILED=1
+    goto :eof
+)
+echo        [发布] !REL_TAG! 已上传 !REL_ASSET!
+goto :eof
+
+REM ============================================
+REM  仅发布：用根目录已有的 cedinia-<版本>.apk 走 GitHub Release 流程（不编译）
+REM  用于构建成功但发布失败后重试，或发布已手动导出的 APK
+REM ============================================
+:publish_only
+set "BUILD_MODE=release"
+echo.
+echo ============================================
+echo  Cedinia 发布 GitHub Release - %date% %time%
+echo ============================================
+
+REM 只读版本号，不递增
+call :bump_version no-bump
+if "!BUILD_FAILED!"=="1" goto :end
+
+call :publish_github_release %*
+if "!BUILD_FAILED!"=="1" goto :end
+
+echo.
+echo ============================================
+echo  发布流程结束。
+echo ============================================
+goto :end
+
+REM ============================================
 REM  清理构建产物
 REM ============================================
 :clean
@@ -830,7 +979,7 @@ if "!BUILD_FAILED!"=="1" goto :end
 
 REM ---- 步骤1: cargo fetch ----
 echo.
-echo [1/3] cargo fetch（检查/下载依赖）...
+echo [1/4] cargo fetch（检查/下载依赖）...
 
 set "STEP_NAME=cargo fetch"
 cargo fetch
@@ -841,7 +990,7 @@ if %ERRORLEVEL% neq 0 (
 
 REM ---- 步骤2: 交叉编译并打包 APK ----
 echo.
-echo [2/3] cargo apk build !CARGO_FLAGS!...
+echo [2/4] cargo apk build !CARGO_FLAGS!...
 echo       编译 Rust 原生库和 Java DEX（首次约 10-20 分钟）...
 echo.
 
@@ -850,9 +999,16 @@ if "!BUILD_FAILED!"=="1" goto :end
 
 REM ---- 步骤3: 导出 APK 到项目根目录（文件名带版本号）----
 echo.
-echo [3/3] 导出 APK 到项目根目录...
+echo [3/4] 导出 APK 到项目根目录...
 
 call :publish_apk
+if "!BUILD_FAILED!"=="1" goto :end
+
+REM ---- 步骤4: 发布 GitHub Release（同上，参数需显式透传）----
+echo.
+echo [4/4] 发布 GitHub Release...
+
+call :publish_github_release %*
 if "!BUILD_FAILED!"=="1" goto :end
 
 echo.

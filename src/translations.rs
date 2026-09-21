@@ -280,7 +280,7 @@ pub(crate) fn translate_items(app: &MainWindow) {
     t.set_compare_res_mismatch_text(flc!("compare_res_mismatch").into());
     t.set_compare_score_progress_text(flc!("compare_score_progress").into());
     t.set_compare_score_accept_hint_text(flc!("compare_score_accept_hint").into());
-    t.set_compare_delete_below_score_text(flc!("compare_delete_below_score").into());
+    t.set_compare_score_button_text(flc!("compare_score_button").into());
     t.set_compare_score_dialog_title_text(flc!("compare_score_dialog_title").into());
     t.set_compare_score_dialog_hint_text(flc!("compare_score_dialog_hint").into());
     t.set_compare_score_dialog_limit_text(flc!("compare_score_dialog_limit").into());

@@ -1,4 +1,4 @@
-Cedinia 是一款 Android 触控友好型 GUI 前端，基于 [Slint](https://slint.dev) 构建，为 [Czkawka Core](https://github.com/qarmin/czkawka) 提供图形界面。当前版本：**12.0.6**。
+Cedinia 是一款 Android 触控友好型 GUI 前端，基于 [Slint](https://slint.dev) 构建，为 [Czkawka Core](https://github.com/qarmin/czkawka) 提供图形界面。版本号以 `Cargo.toml` 的 `package.version` 为准（应用内「设置 → 诊断」显示的就是它），每次 `build.bat` 构建会自动 patch +1，并发布到 GitHub Releases。
 
 ## 功能
 
@@ -39,7 +39,7 @@ Cedinia 是一款 Android 触控友好型 GUI 前端，基于 [Slint](https://sl
 - 点按中间的数字即确认当前分数（默认 5 分不必来回加减），也可用 `−` / `+` 微调
 - 未评分的图片显示“点数字确认分数”提示，评分后显示“已评分 N / 总数”
 - 缩略图左上角显示该图片的分数角标，重新打开该分组后分数依然保留
-- 组内图片全部评过分后，对比界面下方的“按评分删除”按钮解锁
+- 组内图片全部评过分后，视图切换栏右侧的“评分”按钮解锁（解锁后为红色，点击打开按评分删除弹窗）
 - 弹窗中可输入或调整“评分界限”（1–10），实时显示“将删除：N 张图片”
 - 确认后一次性删除本组评分低于界限的图片（Android 为永久删除，桌面版移入回收站），随后仍停留在该组剩余图片上继续对比；整组删完则退出对比视图
 - 删除失败的文件不会中断流程，失败项集中显示在错误弹窗中
@@ -71,14 +71,24 @@ Cedinia 是一款 Android 触控友好型 GUI 前端，基于 [Slint](https://sl
 
 | 命令 | 说明 |
 |------|------|
-| `build` / `build android` | 构建 Android Release APK |
-| `build android-debug` | 构建 Android Debug APK |
+| `build` / `build android` | 构建 Android Release APK，并发布 GitHub Release |
+| `build android-debug` | 构建 Android Debug APK（不发布） |
 | `build android-aab` | 构建 Google Play AAB 包 |
 | `build desktop` | 构建桌面版 |
+| `build publish` | 用根目录已有的 `cedinia-<版本>.apk` 只走发布流程（不重新编译） |
 | `build clean` | 清理构建产物 |
 | `build check` | 检查构建环境 |
+| `build ... no-bump` | 本次构建不递增版本号 |
+| `build ... no-release` | 本次构建不发布 GitHub Release，只产出 APK |
 
 安装包导出到项目根目录（`cedinia-<版本>.apk` / `cedinia-<版本>.aab`）；每次导出成功后会自动删除根目录下其他版本的安装包，只保留本次产物。
+
+### 版本号与 GitHub 发布
+
+- 版本号只需在 `Cargo.toml` 里维护，`build.bat` 每次 Android 构建会把 patch 位 +1，并同步写回 `Cargo.toml` 与 `android/app/build.gradle.kts`；应用内显示的版本号直接取自编译进二进制的版本，构建后自动同步，不会出现写死的旧版本号
+- Android Release 构建成功后自动执行发布：提交版本号变更 → 打标签 `v<版本>` → 推送分支与标签 → `gh release create` 并把 `cedinia-<版本>.apk` 作为附件上传
+- 发布依赖 GitHub CLI：需已安装 `gh` 并登录（`gh auth login`）。缺少 `gh`、未登录或 Debug 构建时自动跳过发布，不影响 APK 产出；加 `no-release` 可强制只构建不发布
+- 构建成功但发布失败时，无需重新编译，直接运行 `build publish` 重试即可（已存在的标签会被复用，同名附件会被覆盖上传）
 
 除 `build clean` 外，也可直接运行 `clean.bat`：默认清理编译产物与输出文件，`clean all` 额外清理 Gradle/Cargo 缓存，另有 `clean rust` / `clean android` / `clean logs` 可选。清理范围包括根目录的 APK/AAB 及其 `.idsig` 签名、`target\{debug,release}\apk\` 下 cargo apk 的中间产物。
 

@@ -209,6 +209,9 @@ fn run_app_inner(
 
     translate_items(&window);
     set_initial_gui_infos(&window);
+    // Settings shows this string verbatim; CARGO_PKG_VERSION is bumped by the build script, so the
+    // label can never drift from the binary being run.
+    window.global::<AppState>().set_app_version(SharedString::from(env!("CARGO_PKG_VERSION")));
     window.global::<AppState>().set_status_message(SharedString::from(crate::flc!("status_ready")));
 
     let bot_lp = inset_bottom_px / scale;

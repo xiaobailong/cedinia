@@ -120,6 +120,9 @@ export global BigFilesSettings {
 
 
 export global AppState {
+    // Filled from Rust with cargo's CARGO_PKG_VERSION, which the build script bumps on every
+    // Android build - the Settings screen never shows a stale version.
+    in-out property <string>     app_version:     "";
     in-out property <bool>       is_desktop:      true;
     in-out property <ActiveTool> active_tool:    ActiveTool.Home;
 

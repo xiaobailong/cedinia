@@ -866,12 +866,33 @@ export component ImageCompareOverlay inherits Rectangle {
                         vertical-alignment:   TextVerticalAlignment.center;
                     }
                 }
+
+                // Score-based delete of the whole group - opens the same dialog as before, but
+                // lives with the view-mode pills instead of the progress strip. Enabled only once
+                // every image of the group is scored.
+                Rectangle {
+                    width: score_txt.preferred-width + 24px; height: 36px;
+                    border-radius: 8px;
+                    background: !AppState.compare_all_rated ? CediniaColors.bg_surface
+                        : (score_ta.has-hover ? CediniaColors.danger.brighter(0.15) : CediniaColors.danger);
+                    animate background { duration: 100ms; }
+                    score_ta := TouchArea {
+                        enabled: AppState.compare_all_rated;
+                        clicked => { AppState.compare_score_delete_open(); }
+                    }
+                    score_txt := Text {
+                        text: Translations.compare_score_button_text;
+                        color: AppState.compare_all_rated ? CediniaColors.fg_on_danger : CediniaColors.text_disabled;
+                        font-size: Fonts.body; font-weight: Fonts.semibold;
+                        horizontal-alignment: TextHorizontalAlignment.center;
+                        vertical-alignment:   TextVerticalAlignment.center;
+                    }
+                }
             }
         }
 
-        // Scoring summary of the opened group and the entry to the score-based delete.
-        // Hidden until at least one image is scored, so an untouched compare view keeps
-        // its usual layout.
+        // Scoring progress of the opened group. Hidden until at least one image is scored,
+        // so an untouched compare view keeps its usual layout.
         if AppState.compare_rated_count > 0: Rectangle {
             height: 48px;
             background: CediniaColors.bg_elevated;
@@ -892,15 +913,6 @@ export component ImageCompareOverlay inherits Rectangle {
                     color: AppState.compare_all_rated ? CediniaColors.success : CediniaColors.text_secondary;
                     font-size: Fonts.caption;
                     overflow: TextOverflow.elide; wrap: no-wrap;
-                }
-
-                TouchButton {
-                    label: Translations.compare_delete_below_score_text;
-                    min_h: 36px;
-                    enabled: AppState.compare_all_rated;
-                    bg: CediniaColors.danger;
-                    fg: CediniaColors.fg_on_danger;
-                    clicked => { AppState.compare_score_delete_open(); }
                 }
             }
         }
