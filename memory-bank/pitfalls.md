@@ -14,6 +14,8 @@
   「PowerShell 只读原件 → 结果写 stdout → cmd 的 `>` 落盘 → `move` 覆盖」，替换动作用 `[Regex]::Matches` + `Remove/Insert`。
 - 反例: `powershell -Command "$t -replace '(\+)\d+', ...; [IO.File]::WriteAllText(...)"`
 - 自检: 退出码 786，或"没输出但应该有输出" ⇒ 立刻改 `-File` 或改「只读 + stdout + cmd 重定向」写法。
+- 同类（2026-09-23）: `$list.Add((…) -replace 'a','b')` 的逗号会被当**第二个实参**（`overload …count: "2"`，多加一层括号）；
+  `$int + ':'` 报 `Cannot convert value ":" to type "System.Int32"`（改用 `"{0}: {1}" -f $i,$l`）。
 
 ## PIT-002 `.ps1` = UTF-8 **带 BOM** + CRLF；`.bat` / `.md` = UTF-8 **无 BOM**（+ CRLF）
 - 现象: 无 BOM 的 `.ps1` 被 PowerShell 5.1 按 GBK 读 ⇒ 中文乱码甚至语法错；
@@ -25,6 +27,7 @@
 - 自检: `.ps1` 要 `enc=BOM` + `bareLF=0`；`.bat` / `.md` 要 `enc=noBOM` + `bareLF=0`。
 - 追加坑: **无 BOM 的 ps1 里不要出现中文字面量 / 中文路径** —— 路径会被 GBK 解码成乱码，
   脚本一声不响、`Get-Content` 返回 **0 行**（看着像"文件是空的"）；改用通配符定位文件。
+  同类（2026-09-23）: 中文 pattern **零命中**（会骗出"已清理干净"的结论）；改码点拼 `[char]0x672A…`。
 
 ## PIT-003 嵌套数组被展平 ⇒ 按字符全局替换 — 已归档（2026-09-23）
 - 要点: 成对替换用两个独立 `[string]` 参数、单对单次调用；自检: 替换后逐行看 `git diff`。详情: `archive/pitfalls-archive.md`
@@ -157,6 +160,7 @@
 - 现象: `out` 写对了，`out2` **文件都不存在**（不是内容错，是压根没跑）。
 - 正确做法: `if/else` 单独占行（或用 `goto` 分流）；一行里只留无分支的 `&` 链。
 - 自检: 链上每个产物文件是否都生成；缺一个就拆行（别据此以为"命令失败了"）。
+- 复发（2026-09-23）: `if exist X del X & call … > log` ⇒ 后面的 `call` 与日志文件**都不执行**；换成 `del /q X 2>nul & call …` 即可。
 
 ## PIT-025 批处理里调另一个 `.bat` 必须 `call`；抽段测试的起点要用「标签行」
 - 触发条件: ①`.bat` 里直接写 `other.bat`（不带 `call`）；②用"从某标签切到文件尾"的方式抽子过程去测。
@@ -168,21 +172,12 @@
 - 反例: 以为「`exit /b 1` 会正常返回父批」；以为「抽段测试只是文本切片，不会执行真流程」。
 - 自检: 测试输出里出现主流程标志（`[2/6]` / `Updated tag` / `推送 `）⇒ 主流程被跑，立刻停手查抽取起点。
 
-## PIT-026 `.bat` + `chcp 65001`：头部**中文注释**会被错解析 ⇒ 行错位、注释片段当命令执行
-- 触发条件: UTF-8（无 BOM）`.bat` 且前段有中文 / 全角注释；在**新控制台**（起始代码页 936：双击、`start "" /min cmd /c`）运行。
-- 现象: 输出顶部冒出 `'EM' is not recognized` / `'…长头部注释块。' is not recognized` 这类垃圾报错；脚本大体还能跑，
-  但**被带偏的下一行可能整行失效**。
-- 正确做法: ①**根治 = 脚本开头自我重启一次**：`chcp 65001 > nul` 之后写
-  `if defined _CED_GH_RELAUNCH goto :gh_relaunched` → `set "_CED_GH_RELAUNCH=1"` →
-  `cmd /d /s /c ""%~f0" %*"` → `set "_CED_GH_RC=%ERRORLEVEL%"` → `exit /b %_CED_GH_RC%`
-  —— 新 cmd 的起始代码页已是 65001，整个文件从第 0 字节起按 UTF-8 解析（`gh-release.bat` 用这招）；
-  `build.bat` / `clean.bat` 靠"父进程先用 PowerShell 把控制台设成 UTF-8 再起子 cmd"（`build.bat:11-15`），效果等价；
-  ②兜底（不自我重启时）: 重启块之前的 `REM` 注释保持 ASCII；注释里不要出现 `> < & | ^ %`
-  （`REM a > b` 会创建文件、`REM a & b` 会执行 `b`，`PIT-006` 同族）；
-  ③把 `chcp 65001` 挪到第 1 行**没用**。
-- 反例: 以为"有 `chcp 65001` 就没事"；把垃圾报错当成"脚本逻辑坏了 / 命令失败"。
-- 自检: 用**新控制台**跑只读模式 `start "" /min cmd /c "gh-release.bat check > tmp\x.out 2>&1"`，
-  输出顶部不应出现任何 `is not recognized`；注释行扫描 `rem_bad=0`（临时 ps1：非 ASCII 或 `> < & | ^ %` 计数）。
+## PIT-026 `.bat` + `chcp 65001`：头部**中文注释**会被错解析 — 已归档（2026-09-23）
+- 要点: 根治 = 脚本开头自我重启一次（`chcp 65001` 之后 `if defined _X goto :relaunch` → `set "_X=1"` →
+  `cmd /d /s /c ""%~f0" %*"` → `exit /b %ERRORLEVEL%`），新 cmd 起始代码页即 65001、全文件按 UTF-8 解析
+  （`gh-release.bat` 用这招；`build.bat:11-15` 用"父进程先设控制台码页再起子 cmd"等价）；
+  兜底 = 重启块之前的 `REM` 保持 ASCII 且不含 `> < & | ^ %`。
+- 自检: **新控制台**跑 `gh-release.bat check`，输出顶部不应出现 `is not recognized`。详情: `archive/pitfalls-archive.md`
 
 ## PIT-027 `gh release upload --clobber` 会漏删同名资产 ⇒ HTTP 422 `ReleaseAsset.name already exists`
 - 触发条件: Release 里已经有同名 APK（尤其是上一次上传中途 TLS 超时 / 中断过），再次 `release upload --clobber`。
@@ -195,6 +190,7 @@
   cedinia 已落到 `gh-release.bat`（`:drop_same_asset`）。
 - 反例: 以为"`--clobber` 一定覆盖成功"；把 422 当成"权限 / 标签不存在"。
 - 自检: 同一版本**连跑两次** `gh-release.bat`，第二次不应再出现 422。
+- 复发 2026-09-23: 资产上传成功后 `gh release view --json assets` 仍返回 `[]`，而 REST（`gh api .../releases/<id>`）与下载链接（`302` → `200`，`Content-Length` 对得上）都正常 ⇒ 查资产**以 REST 为准**。
 
 ## PIT-028 Cline 的读取有上限，超了会**中间截断**（首尾保留）⇒ 大文件必须分段读
 - 触发条件: `read_files` 读 >2000 行 / ~47k 字符的文件（本仓库 `build.bat` 1137 行、`gh-release.bat` ~420 行）；
@@ -206,3 +202,11 @@
   ③终端输出先 `> tmp\out.txt` 落地再读，生成侧能用 `findstr` / `Select-String` 过滤就先过滤。
 - 反例: 一次读完整个 `build.bat` 就宣称"已通读全仓库脚本"。
 - 自检: 读到的区间是否与文件总行数拼得上（`find /c /v "" <file>` 拿总行数）。
+
+## PIT-029 发布脚本跑在前台时又发一条命令 ⇒ 终端被回收 `Ctrl+C`，留下「已发布但无资产」
+- 触发条件: `gh-release.bat` 在前台跑着（21MB APK 上传约 4-5 分钟），又发了别的命令。
+- 现象: 日志尾出现 `^C ^C`（`build\logs\gh-release_*.log`）；本次后果 = Release 已被 `edit --draft=false` 发布、APK 没传上（`assets: []`）。
+- 正确做法: ①长任务放独立窗口 `start "x" /min cmd /c "tmp\x.bat"`（脚本内部重定向到 `tmp\x.log`），之后只读轮询；
+  ②判活看 `Get-Counter '\Process(gh)\IO Read Bytes/sec'`（读盘速率≈上传速率，持续 0 才是卡死）；③补传用 `gh release upload <tag> <apk> --clobber`。
+- 反例: 把「日志半天没新行」当卡死（非 TTY 下 gh 不打印上传进度），连发命令去"催"。
+- 自检: 发布日志里不出现 `^C`。　首次记录: 2026-09-23

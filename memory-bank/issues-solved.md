@@ -42,15 +42,24 @@
 - 症状 / 现场: 提交成功后 `Connection reset by 20.205.243.166 port 22` ⇒ 脚本硬退出，tag 与 Release 都没执行（本地多一个未推送提交）；
   同一轮 `检查 gh CLI` 还报过"未登录或登录状态异常" —— 其实 `gh auth status` 会联网校验，是网络瞬断；事后复测凭据正常。
   `gh` 走 HTTPS 也报 `net/http: TLS handshake timeout`，设 `http_proxy` / `https_proxy=http://127.0.0.1:7897` 后恢复可用。
-- 复发判据: 日志出现 `Connection reset by … port 22` / `fatal: Could not read from remote repository` / `TLS handshake timeout`；
-  修复后应是 `推送 <ref> ...`（必要时跟 `[重试 n/3]`），并且远端标签已指向 HEAD 时**直接跳过**打标签 / 推标签。
+- 复发判据: 日志出现 `Connection reset by … port 22` / `fatal: Could not read from remote repository` / `TLS handshake timeout` /
+  `Patch "https://api.github.com/repos/…/releases/<id>": EOF`（gh 上传/发布那步被掐断）；
+  修复后应是 `推送 <ref> ...`（必要时跟 `[重试 n/3]`）与 `[警告] Release 步骤失败，3 秒后重试...`，并且远端标签已指向 HEAD 时**直接跳过**打标签 / 推标签。
 - 根因: 本机到 github.com:22 时通时断；脚本原来一次失败就硬退出，没有重试，也没有可操作的提示。
 - 修法（cedinia 现状）: `gh-release.bat` 提供 `:git_push <ref> [force]`（最多 3 次、间隔 3 秒、全败打印成因与手工命令 +
   「改走 HTTPS」指引）、用 `gh api repos/<repo>/commits/<tag> --jq .sha` 判断"远端标签已在 HEAD"从而跳过 tag 推送（走 HTTPS，绕开卡死的 SSH）、
-  `GH_PROXY` 注入代理（未设时探测 `127.0.0.1:7897` / `7890`）。
-  **`build.bat:806-817` 的 `git push origin HEAD` / `git push origin <tag>` 仍是单次尝试**（无重试、不查远端标签）⇒ 这条路径仍会踩坑，见 `ADR-009` 的影响栏。
+  `GH_PROXY` 注入代理（未设时探测 `127.0.0.1:7897` / `7890`，**接受任何非 `000` 应答** —— `api.github.com` 对匿名请求会回 `403`（共享出口 IP 被限流），
+  只认 `200` 会静默丢掉代理、让 gh 去裸连超时）；`:gh_release` 自身也是 3 次重试（外层重试环 + 内部 `:gh_release_once`，`gh-release.bat:399-438`）。
+  **`build.bat` 侧 2026-09-23 已对齐**（`:git_push` 3 次重试、`:pub_tag` 远端==HEAD 跳过推标签、gh 步骤 3 次重试 + REST 删同名资产、发布步骤自带代理探测——全局探测只看 7890 而本机 Clash 在 7897），见 `ADR-013`；
+  仍**已补**一处: `:publish_github_release` 开头改成 `call :pub_check_auth`（`gh auth status` 是联网自检，重试 3 次；仍失败只警告并**继续**发布，
+  不再"静默跳过"—— 那种行为会表现为"构建成功但没发版"）。
 - 反例 / 易误判: 把 `gh 未登录` 当真（其实是联网自检失败）；把推送失败当脚本 bug（链路问题要换 HTTPS / 代理）。
-- 相关: `ADR-009` / `ADR-011`；首次记录: 2026-09-23（源仓库） ／ 最近复核: 2026-09-23（cedinia 现状行号已复核）
+- 复发记录（2026-09-23 · cedinia 第二轮）: `build\logs\gh-release_20260923_173151.log` —— `Connection reset by 20.205.243.166 port 22` 被 `[重试 2/3]` 救回、标签推送成功；
+  紧接着 `Patch "https://api.github.com/repos/xiaobailong/cedinia/releases/394499827": EOF` 打断 gh 的发布步骤（当时 gh 侧无重试）⇒ 发布停在这里。
+  事后核对：远端 `v12.0.9` 已指向 HEAD，但 Release / 草稿都不存在（`gh api repos/xiaobailong/cedinia/releases/394499827` → `404`）——
+  gh 先把 Release 建成草稿、传完资产再 PATCH 发布，失败时会把草稿删掉（gh 2.101 `pkg/cmd/release/create/create.go:533-563`）
+  ⇒ **直接重跑 `gh-release.bat` 即可**，不需要先清残留。
+- 相关: `ADR-009` / `ADR-011`；首次记录: 2026-09-23（源仓库） ／ 最近复核: 2026-09-23（复发：gh 发布步骤已加重试，桩测 `RC=0` / `RC=1` 各一例；`gh-release.bat check` exit 0）
 
 ## ISSUE-006 抽段测试把「主流程」当成子过程跑了 ⇒ 误建并推送真实 tag
 - 状态: 已修复（源仓库实录；cedinia 沿用同一抽取纪律）
@@ -61,10 +70,17 @@
 - 根因: `$text.IndexOf(':check_gh')` 命中的是**主流程里的 `call :check_gh`**（早于 `:check_gh` 标签行）；
   切出来的正文 = 主流程 + 尾部子过程，派发器 `goto :check_gh` 落到这个「伪标签」后顺序执行主流程（只有 `gh` 是假的，所以没建 Release）。
 - 修法: ①起点改 `(?m)^:check_gh\s*$`；②加断言「首行 = `:check_gh`」「正文不含 `[2/6]`」「标签唯一」；
-  ③测试用假 `git` 放 PATH 最前且 `tag` 一律 `exit /b 1`（兜底）；④抽取副本只做「行首 `"..."` → `call "..."`」的最小改写（`PIT-025`）。
+  ③测试用假 `git` 放 PATH 最前且 `tag` 一律 `exit /b 1`（兜底）；④抽取副本只做「行首 `"..."` → `call "..."`」的最小改写（`PIT-025`）；
+  ⑤**驱动代码必须放在抽取体之前**：尾段以 `exit /b` 结束，驱动写在正文之后一行都不会执行（2026-09-23 实测：`TEST_*_RC` 断言没输出）；
+  ⑥桩的计数 / 调用日志写在桩自己目录里，用例之间用 `del /q … 2>nul` 清（别写 `if exist … & …`，`PIT-024`）；
+  ⑦抽段副本里**所有**桩调用都要 `call`，不止行首 —— `if /i "!X!"=="true" "!GH_EXE!" release edit …` 这种**行中**调用不带 `call` 时，
+  桩的 `exit /b` 会顶替所在子过程的上下文 ⇒ 后面的 REST 删资产 / upload 被整段跳过（2026-09-23 实测：用例报"成功"但一条调用都没发生）；
+  ⑧桩要用 `cmd /c "chcp 65001 > nul & call <harness>"` 启动（等价生产包装器）—— 在 936 码页的控制台里直接读中文 `.bat` 会**行错位**（`PIT-026`），
+  症状是 `'手工重试:' is not recognized` 或 `The system cannot find the batch label specified`，容易被误判成"脚本逻辑坏了"。
 - 反例 / 易误判: 以为「测试只调子过程、不会碰远端」；把非强制推送的 `already exists` 拒绝当成「远端本来就有这个 tag」；只看用例退出码。
 - 相关: `PIT-025`、`ADR-009`、`ADR-011`；
-  cedinia 的子过程集合（抽段测试要按**标签行**切）：`:check_gh` / `:git_push` / `:gh_release` / `:drop_same_asset` / `:find_apk`
+  cedinia 的子过程集合（抽段测试要按**标签行**切）：`:check_gh` / `:git_push` / `:gh_release` / `:gh_release_once` / `:drop_same_asset` / `:find_apk`
+  （`:git_push_try` / `:gh_release_try` 是子过程**内部**的循环入口，不单独切）
 - 首次记录: 2026-09-23（源仓库） ／ 最近复核: 2026-09-23（迁入 cedinia 时复核子过程集合）
 
 ## ISSUE-007 「Enable logging」关掉后仍创建 `Download/cedinia` 并写入启动日志（全局开关不生效）

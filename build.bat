@@ -45,8 +45,8 @@ REM          每次导出成功后会删除根目录下其他版本的安装包�
 REM  发布  : Android Release 构建成功后自动执行 GitHub Release 流程
 REM          （提交版本号变更 -> 打标签 v<版本> -> 推送分支与标签 ->
 REM            gh release create 并上传 APK）。
-REM          需要 GitHub CLI（gh）已安装且已登录；缺少 gh、未登录、或 Debug 构建
-REM          会自动跳过，加 no-release 可强制不发布
+REM          需要 GitHub CLI（gh）已安装；缺少 gh 或 Debug 构建会自动跳过，
+REM          登录自检失败只重试 3 次 + 警告后继续（见 :pub_check_auth），加 no-release 可强制不发布
 REM ============================================
 
 REM ---- 全局状态变量 ----
@@ -738,9 +738,80 @@ if "%PROXY_AVAILABLE%"=="1" (
 goto :eof
 
 REM ============================================
+REM  gh 登录自检（子过程）: auth status 会**联网**校验 token，瞬断 / 无代理时会误报"未登录"
+REM  ⇒ 重试 3 次；仍失败只警告并**继续**发布（真失败会让发布步骤报错并置 BUILD_FAILED，
+REM    不再"静默跳过发布" —— 那种表现是"构建成功但没发版"）
+REM ============================================
+:pub_check_auth
+set "_AUTH_N=0"
+
+:pub_auth_try
+set /a _AUTH_N+=1
+"!GH_EXE!" auth status >nul 2>&1
+if not errorlevel 1 exit /b 0
+if !_AUTH_N! lss 3 (
+    ping -n 3 127.0.0.1 > nul
+    goto :pub_auth_try
+)
+REM guard: keep the next logical lines away from a CJK echo (PIT-026)
+echo [警告] gh 登录自检连续 3 次未通过（网络瞬断也会导致）—— 继续尝试发布，失败会在发布步骤明确报错
+echo        确实无效时请运行: "!GH_EXE!" auth login
+"!GH_EXE!" auth status
+exit /b 0
+
+REM ============================================
+REM  推标签（子过程）: 远端 tag 已指向 HEAD 就**跳过推送**（`gh api commits/<tag>` 走 HTTPS，
+REM  避开时通时断的 SSH；与 gh-release.bat 的"远端快路径"同策略）。刻意**不做**"远端指向别处就强推"
+REM  的交互确认 —— build.bat 要能无人值守跑：比较不出来（API / git 失败）时按老逻辑推。
+REM  返回 0 = 已跳过 / 推送成功；1 = 推送失败（调用方负责置 BUILD_FAILED）
+REM ============================================
+:pub_tag
+set "REMOTE_TAG_SHA="
+if not "!GH_REPO!"=="" for /f "usebackq delims=" %%s in (`call "!GH_EXE!" api "repos/!GH_REPO!/commits/!REL_TAG!" --jq .sha 2^>nul`) do set "REMOTE_TAG_SHA=%%s"
+set "HEAD_SHA="
+for /f "usebackq delims=" %%s in (`call git rev-parse HEAD 2^>nul`) do set "HEAD_SHA=%%s"
+if "!REMOTE_TAG_SHA!"=="" goto :pub_tag_push
+if /i not "!REMOTE_TAG_SHA!"=="!HEAD_SHA!" goto :pub_tag_push
+echo       [发布] 远端 !REL_TAG! 已指向 HEAD，跳过推送标签
+exit /b 0
+
+:pub_tag_push
+call :git_push "!REL_TAG!"
+if errorlevel 1 exit /b 1
+exit /b 0
+
+REM ============================================
+REM  git push (子过程): 瞬断重试 3 次（与 gh-release.bat 的 :git_push 同策略）
+REM  用法: call :git_push HEAD / call :git_push "v1.2.3" [force]
+REM ============================================
+:git_push
+set "_CED_PUSH_REF=%~1"
+set "_CED_PUSH_FORCE="
+if /i "%~2"=="force" set "_CED_PUSH_FORCE=-f"
+set "_CED_PUSH_N=0"
+
+:git_push_try
+set /a _CED_PUSH_N+=1
+if !_CED_PUSH_N!==1 echo       推送 %_CED_PUSH_REF% ...
+if !_CED_PUSH_N! gtr 1 echo       [重试 !_CED_PUSH_N!/3] 推送 %_CED_PUSH_REF% ...
+call git push origin %_CED_PUSH_REF% %_CED_PUSH_FORCE%
+if not errorlevel 1 exit /b 0
+if !_CED_PUSH_N! lss 3 (
+    echo       [警告] 推送失败，3 秒后重试...
+    ping -n 4 127.0.0.1 > nul
+    goto :git_push_try
+)
+REM guard: keep the next logical lines away from a CJK echo (PIT-026)
+echo [错误] git push %_CED_PUSH_REF% 连续 3 次失败！
+echo        常见原因: 网络瞬断（Connection reset / timeout）、代理、22 端口被拦。
+echo        手工重试:            git push origin %_CED_PUSH_REF%
+echo        改走 HTTPS（一次性）: gh auth setup-git ^&^& git remote set-url origin https://github.com/OWNER/REPO.git
+exit /b 1
+
+REM ============================================
 REM  发布 GitHub Release
 REM  提交版本号变更 -> 打标签 v<版本> -> 推送分支与标签 -> gh release 上传 APK
-REM  传参 %* 用于识别 no-release；Debug 构建、缺少 gh、未登录时自动跳过（不算失败）
+REM  传参 %* 用于识别 no-release；Debug 构建、缺少 gh 时自动跳过（不算失败；登录自检见 :pub_check_auth）
 REM ============================================
 :publish_github_release
 REM 与 :bump_version 同理：'call :label' 清空子例程里的 %*，所以参数必须显式透传
@@ -760,12 +831,22 @@ if not defined GH_EXE (
     echo        安装: winget install GitHub.cli    只构建不发布: build ... no-release
     goto :eof
 )
-"!GH_EXE!" auth status >nul 2>&1
-if errorlevel 1 (
-    echo [警告] gh 未登录，跳过发布
-    echo        登录: "!GH_EXE!" auth login
-    goto :eof
-)
+REM ---- 发布步骤的代理（gh 与 git 都吃 http_proxy / https_proxy）----
+REM 全局探测（:76-89）只看 Clash 默认端口 7890，本机常跑在 7897 ⇒ 发布前再探一次。
+REM 只设置本步骤的环境变量，不动全局代理与 android\gradle.properties。
+set "PUB_PROXY="
+if "%PROXY_AVAILABLE%"=="1" set "PUB_PROXY=%HTTP_PROXY%"
+if not defined PUB_PROXY for /f "usebackq delims=" %%a in (`curl -s -o nul --max-time 3 -w "%%{http_code}" -x http://127.0.0.1:7897 https://api.github.com 2^>nul`) do if not "%%a"=="000" set "PUB_PROXY=http://127.0.0.1:7897"
+if not defined PUB_PROXY for /f "usebackq delims=" %%a in (`curl -s -o nul --max-time 3 -w "%%{http_code}" -x http://127.0.0.1:7890 https://api.github.com 2^>nul`) do if not "%%a"=="000" set "PUB_PROXY=http://127.0.0.1:7890"
+if defined PUB_PROXY set "http_proxy=%PUB_PROXY%"
+if defined PUB_PROXY set "https_proxy=%PUB_PROXY%"
+if defined PUB_PROXY echo        [代理] 发布走 %PUB_PROXY%
+
+REM ---- owner/repo（REST 删同名资产要用；build.bat 原本靠 cwd 让 gh 自己推断）----
+set "GH_REPO="
+for /f "usebackq delims=" %%r in (`call "!GH_EXE!" repo view --json nameWithOwner --jq .nameWithOwner 2^>nul`) do set "GH_REPO=%%r"
+
+call :pub_check_auth
 
 set "REL_TAG=v!VERSION_NAME!"
 set "REL_ASSET=cedinia-!VERSION_NAME!.apk"
@@ -803,13 +884,13 @@ if errorlevel 1 (
 )
 
 set "STEP_NAME=git push"
-git push origin HEAD
+call :git_push HEAD
 if errorlevel 1 (
     echo [错误] 推送分支失败（检查 SSH/凭据；只想构建可加 no-release）
     set BUILD_FAILED=1
     goto :eof
 )
-git push origin "!REL_TAG!"
+call :pub_tag
 if errorlevel 1 (
     echo [错误] 推送标签 !REL_TAG! 失败
     set BUILD_FAILED=1
@@ -824,24 +905,72 @@ REM ---- 创建 / 更新 Release 并上传 APK ----
 >> "build\release_notes.md" echo - cedinia-!VERSION_NAME!.apk - arm64-v8a, versionCode !VERSION_CODE!
 >> "build\release_notes.md" echo - Install: adb install -r cedinia-!VERSION_NAME!.apk
 
-set "GH_RC=0"
-"!GH_EXE!" release view "!REL_TAG!" >nul 2>&1
-if errorlevel 1 (
-    set "STEP_NAME=gh release create"
-    "!GH_EXE!" release create "!REL_TAG!" "!REL_ASSET!" --title "Cedinia !REL_TAG!" --notes-file "build\release_notes.md"
-    set "GH_RC=!ERRORLEVEL!"
-) else (
-    set "STEP_NAME=gh release upload"
-    "!GH_EXE!" release upload "!REL_TAG!" "!REL_ASSET!" --clobber
-    set "GH_RC=!ERRORLEVEL!"
+set "_PUB_N=0"
+
+:pub_gh_try
+set /a _PUB_N+=1
+call :pub_gh_once
+if not errorlevel 1 goto :pub_gh_ok
+if !_PUB_N! lss 3 (
+    echo       [警告] Release 步骤失败，3 秒后重试...
+    ping -n 4 127.0.0.1 > nul
+    goto :pub_gh_try
 )
-if not "!GH_RC!"=="0" (
-    echo [错误] GitHub Release 发布失败（手动重试: "!GH_EXE!" release create !REL_TAG! !REL_ASSET!）
-    set BUILD_FAILED=1
-    goto :eof
-)
+REM guard: keep the next logical lines away from a CJK echo (PIT-026)
+echo [错误] GitHub Release 发布失败（连续 3 次）
+echo        常见原因: 网络瞬断 / 代理抖动 —— gh 走的 HTTPS 也会被掐断，症状为 "Patch ...: EOF" / TLS handshake timeout
+echo        手工重试: "!GH_EXE!" release create !REL_TAG! !REL_ASSET!
+echo        半成品:   Release 已发布但资产为空时补传: "!GH_EXE!" release upload !REL_TAG! !REL_ASSET! --clobber
+set BUILD_FAILED=1
+goto :eof
+
+:pub_gh_ok
 echo        [发布] !REL_TAG! 已上传 !REL_ASSET!
 goto :eof
+
+REM --- 一次尝试（幂等）: create，或 edit(草稿转正) + REST 删同名资产 + upload --clobber ---
+:pub_gh_once
+set "STEP_NAME=gh release view"
+"!GH_EXE!" release view "!REL_TAG!" >nul 2>&1
+if not errorlevel 1 goto :pub_gh_update
+
+set "STEP_NAME=gh release create"
+"!GH_EXE!" release create "!REL_TAG!" "!REL_ASSET!" --title "Cedinia !REL_TAG!" --notes-file "build\release_notes.md"
+if errorlevel 1 exit /b 1
+exit /b 0
+
+:pub_gh_update
+echo        Release !REL_TAG! 已存在，更新说明并覆盖上传 APK...
+set "STEP_NAME=gh release edit"
+set "_PUB_DRAFT="
+for /f "usebackq delims=" %%a in (`call "!GH_EXE!" release view "!REL_TAG!" --json isDraft --jq .isDraft 2^>nul`) do set "_PUB_DRAFT=%%a"
+if /i "!_PUB_DRAFT!"=="true" echo       [提示] 该 Release 是草稿，将一并发布
+REM a draft release stays invisible until published; publish it here
+if /i "!_PUB_DRAFT!"=="true" "!GH_EXE!" release edit "!REL_TAG!" --title "Cedinia !REL_TAG!" --notes-file "build\release_notes.md" --draft=false >nul 2>&1
+if /i not "!_PUB_DRAFT!"=="true" "!GH_EXE!" release edit "!REL_TAG!" --title "Cedinia !REL_TAG!" --notes-file "build\release_notes.md" >nul 2>&1
+REM gh 自己的资产列表会过期（--clobber 漏删同名资产 ⇒ HTTP 422，PIT-027），走 REST 按 id 删
+if "!GH_REPO!"=="" goto :pub_gh_upload
+for %%f in ("!REL_ASSET!") do set "PUB_ASSET_NAME=%%~nxf"
+set "_PUB_REL_ID="
+for /f "usebackq delims=" %%a in (`call "!GH_EXE!" api "repos/!GH_REPO!/releases/tags/!REL_TAG!" --jq .id 2^>nul`) do set "_PUB_REL_ID=%%a"
+if "!_PUB_REL_ID!"=="" goto :pub_gh_upload
+for /f "usebackq delims=" %%i in (`call "!GH_EXE!" api "repos/!GH_REPO!/releases/!_PUB_REL_ID!/assets?per_page=100" --jq ".[].id" 2^>nul`) do call :pub_gh_del_asset %%i "!PUB_ASSET_NAME!"
+
+:pub_gh_upload
+set "STEP_NAME=gh release upload"
+"!GH_EXE!" release upload "!REL_TAG!" "!REL_ASSET!" --clobber
+if errorlevel 1 exit /b 1
+exit /b 0
+
+REM --- REST 删同名资产（子过程，参数: <asset id> <asset name>）---
+:pub_gh_del_asset
+set "_DA_ID=%~1"
+set "_DA_NAME="
+for /f "usebackq delims=" %%n in (`call "!GH_EXE!" api "repos/!GH_REPO!/releases/assets/!_DA_ID!" --jq .name 2^>nul`) do set "_DA_NAME=%%n"
+if /i not "!_DA_NAME!"=="%~2" exit /b 0
+echo       清理同名旧资产: !_DA_NAME!
+"!GH_EXE!" api -X DELETE "repos/!GH_REPO!/releases/assets/!_DA_ID!" >nul 2>&1
+exit /b 0
 
 REM ============================================
 REM  仅发布：用根目录已有的 cedinia-<版本>.apk 走 GitHub Release 流程（不编译）

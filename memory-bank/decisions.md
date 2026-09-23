@@ -72,8 +72,8 @@
 - 理由: 同一版本重跑不会卡在 `already exists` / tag 冲突；日志里直接给出 Release URL（可验证）；一处改动一处生效。
 - 备选与为何不选: 把 `build.bat:745-844` 的 `:publish_github_release` 一起改成幂等 + 重试（要动正在稳定工作的主发布链路，本轮不动 ⇒ 代价是两处发布逻辑有漂移风险）；
   用 `gh api` + JSON 判断 Release 是否存在（多一层解析）；保留"已存在只警告"（用户拿不到新 APK 却看到成功）。
-- 影响 / 约束: `build.bat:806-817` 的 `git push origin HEAD` / `git push origin <tag>` **仍是单次尝试且不查远端标签**，网络瞬断仍会中断发布（`ISSUE-005`）；
-  改 gh 行为要同步两处（`build.bat` 的 `:publish_github_release` 与 `gh-release.bat` 的 `:gh_release`）；
+- 影响 / 约束: `build.bat` 的 `git push origin HEAD` / `git push origin <tag>` **2026-09-23 第二轮已改为 `:git_push`（3 次重试）**，见 `ADR-013`；
+  改 gh 行为要同步两处（`build.bat` 的 `:publish_github_release` 与 `gh-release.bat` 的 `:gh_release`）—— 两侧现已是同一策略（3 次重试 + REST 删同名资产）；
   `--clobber` 会先删同名资产再上传，上传失败原资产会丢（可接受；但 gh 的资产列表可能过期，所以先用 REST 按 id 删同名资产，`PIT-027`）。
 
 ## ADR-010 构建日志：逐行先落盘、再回显（tee）
@@ -112,6 +112,9 @@
 - 备选与为何不选: 让 `build.bat` 改成 `call gh-release.bat`（要动主发布链路，风险大，本轮不动 —— 代价是两处 `:gh_release` 有漂移风险）；
   给 `build.bat` 加子命令（仍要改频繁变动的 `build.bat`）；继续靠 `build publish`（它仍会 commit + push）。
 - 影响 / 约束: 脚本只对 HEAD 生效（要发旧提交得先切过去）；改 `:gh_release` 行为要两处一起改（`ADR-009` 影响栏）；
+  `:gh_release` 外层 3 次重试 + 内部 `:gh_release_once`（`gh-release.bat:399-438`，2026-09-23 因 `Patch …: EOF` 补）；
+  代理探测接受任何非 `000` 应答；2026-09-23 实测：**草稿对 `gh release view <tag>` 可见**（`isDraft:true`，`REL_DRAFT` 分支真的跑到了 `edit --draft=false`），
+  所以上次运行残留的草稿会被正常更新 / 发布、不必先清理；但脚本被外部打断（`PIT-029`）留下「已发布但资产为空」的 Release 时它自己补不了，用 `gh release upload <tag> <apk> --clobber`；
   提交标题等动态文本拼进 notes 之前必须消毒（`PIT-025`）；抽段测试必须从**标签行**切（`ISSUE-006`）；`build.bat` 自身行为未改动。
 
 ## ADR-012 知识库 / 规则 / 发布脚本从 ClipboardMerger 迁入：沿用原编号、按 cedinia 现状改写
@@ -128,10 +131,31 @@
 - 理由: 通用坑（cmd / PowerShell / 终端类）是机器级知识，照抄成本远低于重踩；项目专属条目在 cedinia 没有载体，迁进来只会是噪声。
 - 备选与为何不选: 重编号成 cedinia 自己的序列（要改所有交叉引用，且"同名不同事"更易误读）；
   只保留未来新增的条目（把已付过费的机器级结论丢掉）；用 submodule / 软链共享源仓库知识库（跨仓库耦合，改一处影响两处）。
-- 影响 / 约束: 同号条目的内容现在是 cedinia 版 —— 引用前先看条目里的「来源」标记；新增条目从 `ISSUE-007` / `PIT-029` / `ADR-013` 起；
+- 影响 / 约束: 同号条目的内容现在是 cedinia 版 —— 引用前先看条目里的「来源」标记；新增条目取**当前最大号 +1**（以 `.clinerules/memory-bank.md` 记的"现有最大"为准，别照抄本条这份迁移时的快照）；
   源仓库那份知识库仍是它的真源，两边不再自动同步（结论更新要各自落）。
 - 体积上限按本仓库重设（索引 3KB、`I` / `P` / `D` 各 20KB）：迁移后的条目带 cedinia 的「具体形态 + 判据」，比源条目长，
   先按新值运行；真超限仍照 `WRITING.md` §3 归档（先搬到 `archive/`，主文件留一行摘要）。
 - **未迁移的源条目**（cedinia 无对应载体）: `ISSUE-003`（Kotlin `Logger` 日志开关持久化）、`ISSUE-004`（源 `build.bat` 的括号块解析事故，
   机制已由 `PIT-005` 覆盖）、`PIT-022`（`build.gradle.kts` 里 `java.text.X` 全限定名被 Gradle 的 `java` 扩展遮蔽）、
   `ADR-008`（应用内 “更多” 菜单 + BuildConfig 构建信息注入）。
+
+## ADR-013 `build.bat` 的发布链与 `gh-release.bat` 对齐（推翻 `ADR-009` 的"本轮不动 build.bat"）
+- 日期: 2026-09-23 | 状态: 已采纳（用户明确要求）
+- 背景: `ADR-009` 当初刻意不动主发布链 ⇒ 两套发布逻辑漂移；`ISSUE-005` 的复发（`Connection reset` + `Patch …: EOF`）证明 `build.bat` 那条路
+  一旦踩到就是"整条构建做完、发布失败"，且它**没有代理**（全局探测只认 7890，本机在 7897）⇒ gh 裸连、`auth status` 超时被误判"未登录"。
+- 决策: 把 `gh-release.bat` 的三件套搬进 `build.bat`（`:git_push` / `:pub_gh_*` / `:pub_gh_del_asset`，`:745-935`）：
+  ①`:git_push <ref> [force]`（3 次重试 / 间隔 3 秒 / 落败打印成因 + 手工命令），`git push origin HEAD` 与 `<tag>` 都改走它；
+  ②gh 步骤 = 外层 3 次重试 + `:pub_gh_once`（create；或 edit(草稿转正) + REST 按 id 删同名资产 + `upload --clobber`，`PIT-027`）；
+  ③发布步骤内**再探一次代理**（7897 → 7890，非 `000` 即认）—— 只设本步骤的 `http_proxy` / `https_proxy`，**不动全局**与 `android\gradle.properties`
+  （全局设了会把 cargo / gradle 也拉进代理）；
+  ④顺带推导 `GH_REPO`（`gh repo view --json nameWithOwner --jq .nameWithOwner`），只给 REST 删资产用，推导失败就跳过该步；
+  ⑤`:pub_check_auth`：`auth status`（联网自检）重试 3 次，仍失败只警告并**继续**发布（不再"静默跳过"，那会表现为"构建成功但没发版"）；
+  ⑥`:pub_tag`：远端 tag 已指向 HEAD 就**跳过推送**（走 HTTPS API，避开时通时断的 SSH）；**不做**"指向别处就强推"的交互确认（要能无人值守跑），比较不出来时按老逻辑推。
+- 理由: 漂移是 `ISSUE-005` 结构性复发的原因；对齐后瞬断可自愈，不再依赖"手动补发"。
+- 备选与为何不选: 只给两处 `git push` 加重试（gh 步骤仍单次尝试，`EOF` 照样中断发布）；让 `build.bat` 直接 `call gh-release.bat`
+  （参数 / 日志 / 倒计时链路都要改）；`auth status` 失败改成"继续尝试发布"最初被跳过（保留原"静默跳过"语义）——
+  **2026-09-23 第三轮已采纳**（决策 ⑤），"构建成功但没发版"这个缺口已消除。
+- 影响 / 约束: **改发布逻辑必须同时改两处**（`build.bat` 的 `:pub_tag` / `:pub_gh_*` 与 `gh-release.bat` 的 `:gh_release*`）；`build.bat` 不能自测
+  （跑一次就 patch + commit + push + 发 Release）⇒ 靠抽段测试 + 静态扫描（见 `ISSUE-006` ④-⑧）。本轮 11 个用例全绿: `:git_push` 2、
+  gh create 2、gh update 1（含删同名资产）、`:pub_check_auth` 3、`:pub_tag` 3。
+- 相关: `ADR-009` / `ISSUE-005` / `ISSUE-006` / `PIT-027` / `PIT-029`

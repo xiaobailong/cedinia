@@ -2,6 +2,25 @@
 
 > 由 `pitfalls.md` 归档的原文（按时间倒序追加）。归档时逐字搬，不改编号、不删「正确做法 / 反例」。
 
+## PIT-026 `.bat` + `chcp 65001`：头部**中文注释**会被错解析 ⇒ 行错位、注释片段当命令执行
+【归档 2026-09-23，超限移出（仍是钉子条目），原文】
+- 触发条件: UTF-8（无 BOM）`.bat` 且前段有中文 / 全角注释；在**新控制台**（起始代码页 936：双击、`start "" /min cmd /c`）运行。
+- 现象: 输出顶部冒出 `'EM' is not recognized` / `'…长头部注释块。' is not recognized` 这类垃圾报错；脚本大体还能跑，
+  但**被带偏的下一行可能整行失效**。
+- 正确做法: ①**根治 = 脚本开头自我重启一次**：`chcp 65001 > nul` 之后写
+  `if defined _CED_GH_RELAUNCH goto :gh_relaunched` → `set "_CED_GH_RELAUNCH=1"` →
+  `cmd /d /s /c ""%~f0" %*"` → `set "_CED_GH_RC=%ERRORLEVEL%"` → `exit /b %_CED_GH_RC%`
+  —— 新 cmd 的起始代码页已是 65001，整个文件从第 0 字节起按 UTF-8 解析（`gh-release.bat` 用这招）；
+  `build.bat` / `clean.bat` 靠"父进程先用 PowerShell 把控制台设成 UTF-8 再起子 cmd"（`build.bat:11-15`），效果等价；
+  ②兜底（不自我重启时）: 重启块之前的 `REM` 注释保持 ASCII；注释里不要出现 `> < & | ^ %`
+  （`REM a > b` 会创建文件、`REM a & b` 会执行 `b`，`PIT-006` 同族）；
+  ③把 `chcp 65001` 挪到第 1 行**没用**。
+- 反例: 以为"有 `chcp 65001` 就没事"；把垃圾报错当成"脚本逻辑坏了 / 命令失败"。
+- 自检: 用**新控制台**跑只读模式 `start "" /min cmd /c "gh-release.bat check > tmp\x.out 2>&1"`，
+  输出顶部不应出现任何 `is not recognized`；注释行扫描 `rem_bad=0`（临时 ps1：非 ASCII 或 `> < & | ^ %` 计数）。
+
+
+
 ## PIT-021 【已复现 2026-09-23】日志在 `build\logs\`，而流程第 2 步 `gradle clean` 会删 `build\`
 【归档 2026-09-23，超限移出（仍是钉子条目），原文】
 - 已复现证据: `build\logs\build_20260922_231449.log:22-31` 报 `Unable to delete directory ... build\logs\build_<ts>.log`；

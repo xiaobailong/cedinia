@@ -32,7 +32,10 @@ REM    gh-release.bat [tag]           explicit tag, still points at HEAD
 REM    gh-release.bat [tag] [apk]     explicit tag + explicit APK path
 REM  Env overrides: GH_EXE / GH_REPO (testing), GH_PROXY (optional HTTP(S) proxy),
 REM    CEDINIA_NO_PAUSE=1 (skip the closing countdown, for scripted runs).
-REM  GH_PROXY unset: the script probes http://127.0.0.1:7897 then :7890 once each.
+REM  GH_PROXY unset: the script probes http://127.0.0.1:7897 then :7890 once each
+REM    (any real HTTP answer counts - a rate-limited 403 still proves the tunnel works).
+REM  Retries: git push and the gh release/upload step each retry 3x on transient
+REM    network errors (Connection reset / EOF / TLS handshake timeout).
 REM  Note: if the remote tag already points at HEAD, tag + push are skipped
 REM        (that check goes over the HTTPS API, so a flaky SSH link cannot block it).
 REM  Log: every line goes to build\logs\gh-release_[ts].log first, then to the console.
@@ -100,8 +103,11 @@ if not defined GH_REPO set "GH_REPO=xiaobailong/cedinia"
 
 REM proxy: gh is a Go binary, it honours http_proxy / https_proxy.
 REM GH_PROXY wins; otherwise probe the local Clash ports once (no-op when nothing listens).
-if not defined GH_PROXY for /f "usebackq delims=" %%a in (`curl -s -o nul --max-time 3 -w "%%{http_code}" -x http://127.0.0.1:7897 https://api.github.com`) do if "%%a"=="200" set "GH_PROXY=http://127.0.0.1:7897"
-if not defined GH_PROXY for /f "usebackq delims=" %%a in (`curl -s -o nul --max-time 3 -w "%%{http_code}" -x http://127.0.0.1:7890 https://api.github.com`) do if "%%a"=="200" set "GH_PROXY=http://127.0.0.1:7890"
+REM any non-000 answer means the tunnel works: api.github.com replies 403 to an anonymous
+REM request once the shared egress IP is rate limited, so accepting 200 only would silently
+REM drop the proxy and let gh hang on the direct connection (ISSUE-005).
+if not defined GH_PROXY for /f "usebackq delims=" %%a in (`curl -s -o nul --max-time 3 -w "%%{http_code}" -x http://127.0.0.1:7897 https://api.github.com 2^>nul`) do if not "%%a"=="000" set "GH_PROXY=http://127.0.0.1:7897"
+if not defined GH_PROXY for /f "usebackq delims=" %%a in (`curl -s -o nul --max-time 3 -w "%%{http_code}" -x http://127.0.0.1:7890 https://api.github.com 2^>nul`) do if not "%%a"=="000" set "GH_PROXY=http://127.0.0.1:7890"
 if not defined GH_PROXY goto :no_proxy
 set "http_proxy=%GH_PROXY%"
 set "https_proxy=%GH_PROXY%"
@@ -381,10 +387,14 @@ echo        改走 HTTPS（一次性）: gh auth setup-git ^&^& git remote set-u
 exit /b 1
 
 REM ============================================
-REM  create / update GitHub Release + upload APK (idempotent subroutine)
+REM  create / update GitHub Release + upload APK (retry wrapper around :gh_release_once)
 REM  needs: GH_EXE / GH_REPO / GH_TAG / V_NAME / V_CODE / GH_COMMIT / APK_PATH (env vars)
 REM  note: goto branches instead of if/else blocks -- a half-width paren coming from the
 REM        commit subject would break block parsing (PIT-005)
+REM  retry 3x: gh's own HTTPS calls get cut off too (ISSUE-005: "Patch <release api url>: EOF").
+REM  Rerunning is safe: gh uploads to a draft it created itself and deletes that draft when
+REM  the upload / publish step fails, and a published release is redone through the
+REM  edit + upload --clobber branch.
 REM ============================================
 :gh_release
 if "%APK_PATH%"=="" (
@@ -404,6 +414,29 @@ set "GH_NOTES_FILE=build\gh_release_notes.md"
 >> "%GH_NOTES_FILE%" echo - cedinia-%V_NAME%.apk - arm64-v8a, versionCode %V_CODE%
 >> "%GH_NOTES_FILE%" echo - Install: adb install -r cedinia-%V_NAME%.apk
 >> "%GH_NOTES_FILE%" echo - Commit: %GH_COMMIT%
+
+set "_GR_N=0"
+
+:gh_release_try
+set /a _GR_N+=1
+call :gh_release_once
+if not errorlevel 1 exit /b 0
+if !_GR_N! lss 3 (
+    echo       [警告] Release 步骤失败，3 秒后重试...
+    ping -n 4 127.0.0.1 > nul
+    goto :gh_release_try
+)
+
+REM guard: keep the next logical lines away from a CJK echo (PIT-026)
+echo [错误] Release 步骤连续 3 次失败
+echo        常见原因: 网络瞬断 / 代理抖动 —— gh 走的 HTTPS 也会被掐断，症状为 "Patch ...: EOF" / TLS handshake timeout
+echo                  本机代理约 75KB/s，21MB 的 APK 上传要 4-5 分钟，慢不等于卡死（看 gh 的读盘速率，PIT-029）
+echo        手工重试:  %GH_EXE% release create "%GH_TAG%" "%APK_PATH%" --repo "%GH_REPO%"
+echo        半成品:    Release 已发布但资产为空时补传: %GH_EXE% release upload "%GH_TAG%" "%APK_PATH%" --clobber --repo "%GH_REPO%"
+exit /b 1
+
+REM --- one attempt: create, or update + overwrite-upload (idempotent) ---
+:gh_release_once
 
 "%GH_EXE%" release view "%GH_TAG%" --repo "%GH_REPO%" >nul 2>&1
 if not errorlevel 1 goto :gh_release_update
