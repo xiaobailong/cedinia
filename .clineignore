@@ -1,0 +1,38 @@
+# .clineignore —— 让 Cline 别扫构建产物（token 最大的一处浪费）
+# 语法同 .gitignore（含 `!` 反选）。两处是故意的：
+#   1) **不忽略 `tmp/`** —— 命令输出先重定向到 `tmp\*.out` 再用 read_files 读（PIT-008），忽略了就读不到；
+#   2) **不忽略 `build/` 下的日志** —— `build\build_full.log` / `build\logs\` 是排查构建问题的唯一现场
+#      （PIT-016 / PIT-021），忽略掉等于把证据一起屏蔽。
+
+# Rust / Cargo 构建产物（万级文件）
+/target/
+
+# Android / Gradle 构建产物
+/android/app/build/
+/android/build/
+/android/.gradle/
+/android/.kotlin/
+/android/local.properties
+/android/app/src/main/jniLibs/
+
+# `build\` 下除日志以外的一切（channel-rust-*.toml、std_unpack、_wv_new.tmp、keystore_gen.log …）
+/build/*
+!/build/build_full.log
+!/build/clean_full.log
+!/build/logs/
+!/build/logs/*.log
+
+# 二进制 / 分发产物
+*.apk
+*.aab
+*.idsig
+*.class
+*.dex
+
+# 机器本地 / 私密（绝对路径、签名、凭据）
+/android/keystore/
+*.jks
+*.keystore
+*.p12
+*.key
+*.pem

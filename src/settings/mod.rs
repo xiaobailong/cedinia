@@ -242,6 +242,19 @@ fn get_config_file() -> Option<PathBuf> {
     Some(config_folder.join("cedinia_settings.json"))
 }
 
+/// Reads just the persisted logging switch.
+///
+/// Needed by the logger set-up, which runs before `load_settings`: installing a logger is what
+/// creates the log file (and, on Android, the `Download/cedinia` folder), so the flag has to be
+/// known that early. Errors deliberately stay silent here and are reported by `load_settings` -
+/// this runs before a logger exists.
+pub fn load_logging_enabled_flag() -> bool {
+    get_config_file()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|json| serde_json::from_str::<CediniaSettings>(&json).ok())
+        .map_or_else(|| CediniaSettings::default().logging_enabled, |s| s.logging_enabled)
+}
+
 pub fn load_settings() -> CediniaSettings {
     let Some(path) = get_config_file() else {
         info!("Cannot determine config path - using defaults");
@@ -256,8 +269,8 @@ pub fn load_settings() -> CediniaSettings {
     match std::fs::read_to_string(&path) {
         Ok(json) => match serde_json::from_str::<CediniaSettings>(&json) {
             Ok(s) => {
-                // Set before the first log line of the session: every other log site runs after
-                // start-up, so a saved "logging off" keeps the whole session quiet.
+                // `setup_logger_cache` already applied this before installing the logger; repeated
+                // here so the switch can never drift from the file it came from.
                 crate::logging::set_logging_enabled(s.logging_enabled);
                 info!("Settings loaded from {} (logging_enabled={})", path.display(), s.logging_enabled);
                 s

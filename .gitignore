@@ -4,6 +4,9 @@
 # Build logs and temporary output
 /build
 
+# Cline temporary files (see .clinerules/tmp-files.md)
+/tmp/
+
 # Cargo.lock is committed (this is an application, not a library)
 # Cargo.lock
 

@@ -187,8 +187,8 @@ fn run_app_inner(
     #[cfg(target_os = "android")] android_app: Option<slint::android::AndroidApp>,
     #[cfg(not(target_os = "android"))] _android_app: Option<()>,
 ) {
-    // `load_settings` also applies the persisted logging switch, so it has to run before the first
-    // log site of the session (the thumbnail cache clean-up thread just below).
+    // `load_settings` re-applies the persisted logging switch, which `setup_logger_cache` already
+    // honoured before installing the logger.
     let loaded_settings = load_settings();
 
     std::thread::spawn(crate::thumbnail_loader::cleanup_old_thumbnails);
@@ -352,7 +352,7 @@ fn run_app_inner(
                     log::info!("permission poll: storage access granted={granted}");
                     if granted {
                         // Download/cedinia just became writable - move the log file there.
-                        crate::logging::android::retarget_log_file();
+                        crate::logging::open_log_file();
                     }
                 }
                 win.global::<AppState>().set_storage_permission_granted(granted);
@@ -386,8 +386,13 @@ pub(crate) fn setup_logger_cache() {
     czkawka_core::common::build_runtime_info::BuildRuntimeInfo::get();
     let config_cache_path_set_result = set_config_cache_path("cedinia", "cedinia");
 
+    // Applied before any logger exists: installing one creates its log file (and, on Android, the
+    // `Download/cedinia` folder) and every log site up to `load_settings` would otherwise write to
+    // it, so a session with the switch off must not have a logger with a file at all.
+    crate::logging::set_logging_enabled(crate::settings::load_logging_enabled_flag());
+
     #[cfg(not(target_os = "android"))]
-    setup_logger(false, "cedinia", filtering_messages);
+    init_desktop_logging();
     #[cfg(target_os = "android")]
     setup_android_logger();
 
@@ -395,6 +400,29 @@ pub(crate) fn setup_logger_cache() {
 
     print_version_mode("Cedinia");
     print_infos_and_warnings(config_cache_path_set_result.infos, config_cache_path_set_result.warnings);
+}
+
+/// czkawka_core's terminal/file logger.
+///
+/// It creates the log file while it is built, so it is only installed for a session that logs -
+/// and installed late, through the log file hooks, when the switch is turned on afterwards.
+#[cfg(not(target_os = "android"))]
+fn init_desktop_logging() {
+    crate::logging::set_log_file_hooks(install_desktop_logger, || {});
+    if crate::logging::is_logging_enabled() {
+        install_desktop_logger();
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+fn install_desktop_logger() {
+    static INSTALLED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    if INSTALLED.set(()).is_err() {
+        return;
+    }
+    setup_logger(false, "cedinia", filtering_messages);
+    // Installing a logger resets the facade's max level to its own - re-apply the switch state.
+    crate::logging::apply_log_level();
 }
 
 /// Applies the seven day retention window to every folder a log file can end up in - the
@@ -409,12 +437,15 @@ fn prune_stale_logs() {
     }
 }
 
+/// The file the `DualLogger` writes to, shared with the log file hooks that swap in a file from
+/// the Downloads folder once the user grants storage access - and clear it when logging goes off.
+#[cfg(target_os = "android")]
+type LogFileSlot = Arc<std::sync::Mutex<Option<std::fs::File>>>;
+
 #[cfg(target_os = "android")]
 struct DualLogger {
     android: android_logger::AndroidLogger,
-    // The slot is shared with the retarget hook, which swaps in a file from the Downloads
-    // folder once the user grants storage access.
-    file: Arc<std::sync::Mutex<Option<std::fs::File>>>,
+    file: LogFileSlot,
     level: log::LevelFilter,
 }
 
@@ -452,39 +483,38 @@ impl log::Log for DualLogger {
 
 #[cfg(target_os = "android")]
 fn setup_android_logger() {
-    let android = android_logger::AndroidLogger::new(android_logger::Config::default().with_max_level(log::LevelFilter::Debug).with_tag("cedinia"));
+    let android = android_logger::AndroidLogger::new(android_logger::Config::default().with_max_level(crate::logging::LOG_LEVEL).with_tag("cedinia"));
 
+    // No file (and no `Download/cedinia` folder) while the switch is off - `open_android_log_file`
+    // is the single place that decides, so it also covers the storage-access re-open below.
     let opened = open_android_log_file();
     let log_path = opened.as_ref().map(|(path, _)| path.clone());
-    let file = Arc::new(std::sync::Mutex::new(opened.map(|(_, file)| file)));
+    let file: LogFileSlot = Arc::new(std::sync::Mutex::new(opened.map(|(_, file)| file)));
 
     let logger = DualLogger {
         android,
         file: Arc::clone(&file),
-        level: log::LevelFilter::Debug,
+        level: crate::logging::LOG_LEVEL,
     };
     if log::set_boxed_logger(Box::new(logger)).is_ok() {
-        log::set_max_level(log::LevelFilter::Debug);
+        // The facade's max level is reset by installing a logger - hand it back to the switch.
+        crate::logging::apply_log_level();
         match &log_path {
             Some(path) => log::info!("setup_android_logger: DualLogger installed (logcat tag 'cedinia' + \"{}\")", path.display()),
-            None => log::error!("setup_android_logger: DualLogger installed without a writable log file - only logcat output is written"),
+            None => log::debug!("setup_android_logger: DualLogger installed without a log file (logging switched off or no writable folder)"),
         }
     }
 
     // Storage access is normally granted after startup, and only then is Download/cedinia
-    // writable - re-open the file so the rest of the session is logged there.
-    crate::logging::android::set_log_retarget_hook(move || {
-        let opened = open_android_log_file();
-        let path = opened.as_ref().map(|(path, _)| path.clone());
+    // writable - re-open the file so the rest of the session is logged there. The same hook runs
+    // when the logging switch is turned back on.
+    crate::logging::set_log_file_hooks(
         {
-            let mut slot = file.lock().unwrap_or_else(|e| e.into_inner());
-            *slot = opened.map(|(_, file)| file);
-        }
-        // Logged after the slot is released - writing to it takes the same lock.
-        if let Some(path) = path {
-            log::info!("setup_android_logger: log file is now \"{}\"", path.display());
-        }
-    });
+            let file = Arc::clone(&file);
+            move || reopen_android_log_file(&file)
+        },
+        move || *file.lock().unwrap_or_else(|e| e.into_inner()) = None,
+    );
 
     // Route panics into the logger/file without pulling in the log_panics crate.
     std::panic::set_hook(Box::new(|info| {
@@ -492,23 +522,46 @@ fn setup_android_logger() {
     }));
 }
 
+/// Points the logger at today's log file, keeping it in the cache folder until `Download/cedinia`
+/// is writable.
+#[cfg(target_os = "android")]
+fn reopen_android_log_file(file: &LogFileSlot) {
+    let opened = open_android_log_file();
+    let path = opened.as_ref().map(|(path, _)| path.clone());
+    {
+        let mut slot = file.lock().unwrap_or_else(|e| e.into_inner());
+        *slot = opened.map(|(_, file)| file);
+    }
+    // Logged after the slot is released - writing to it takes the same lock.
+    if let Some(path) = path {
+        log::info!("logging: log file is now \"{}\"", path.display());
+    }
+}
+
 /// Today's log file: `Download/cedinia/cedinia_<date>.log`, or the same name in the private
 /// cache folder while the shared storage is not writable yet.
 #[cfg(target_os = "android")]
 fn open_android_log_file() -> Option<(PathBuf, std::fs::File)> {
+    // The switch gates the file itself, not just the level: a session with logging off must not
+    // create the file (nor the folder holding it) and gets it opened once logging is turned on.
+    if !crate::logging::is_logging_enabled() {
+        return None;
+    }
+
     let cache_folder = czkawka_core::common::config_cache_path::get_config_cache_path()?.cache_folder;
     let name = crate::logging::android::daily_log_file_name();
 
-    if let Some(dir) = crate::logging::android::download_log_dir()
-        && let Some(opened) = open_log_file(&dir.join(&name))
+    if let Some(dir) = crate::logging::android::create_download_log_dir()
+        && let Some(opened) = open_log_file_at(&dir.join(&name))
     {
         return Some(opened);
     }
-    open_log_file(&cache_folder.join(&name))
+    open_log_file_at(&cache_folder.join(&name))
 }
 
+/// Opens one specific log file, appending to it (or truncating a runaway one).
 #[cfg(target_os = "android")]
-fn open_log_file(path: &std::path::Path) -> Option<(PathBuf, std::fs::File)> {
+fn open_log_file_at(path: &std::path::Path) -> Option<(PathBuf, std::fs::File)> {
     // A day of logging stays far below this cap - it only guards against a runaway log loop.
     let truncate = std::fs::metadata(path).map_or(false, |m| m.len() > 50 * 1024 * 1024);
     let mut opts = std::fs::OpenOptions::new();

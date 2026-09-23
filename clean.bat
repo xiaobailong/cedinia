@@ -290,6 +290,12 @@ REM Rust analyzer 缓存
 if exist "%USERPROFILE%\.rustup\toolchains" (
     echo        [跳过] Rust 工具链（非构建产物）
 )
+
+REM Cline 的临时产物（见 .clinerules/tmp-files.md）：根目录 tmp\ 整目录删除
+if exist "tmp" (
+    rmdir /s /q "tmp" 2>nul
+    echo        tmp\ ^(Cline 临时产物^) 已删除
+)
 goto :eof
 
 REM ============================================

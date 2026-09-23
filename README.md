@@ -89,6 +89,7 @@ Cedinia 是一款 Android 触控友好型 GUI 前端，基于 [Slint](https://sl
 - Android Release 构建成功后自动执行发布：提交版本号变更 → 打标签 `v<版本>` → 推送分支与标签 → `gh release create` 并把 `cedinia-<版本>.apk` 作为附件上传
 - 发布依赖 GitHub CLI：需已安装 `gh` 并登录（`gh auth login`）。缺少 `gh`、未登录或 Debug 构建时自动跳过发布，不影响 APK 产出；加 `no-release` 可强制只构建不发布
 - 构建成功但发布失败时，无需重新编译，直接运行 `build publish` 重试即可（已存在的标签会被复用，同名附件会被覆盖上传）
+- 只补发 Release（不编译、不提交、不动版本号）：直接运行仓库根的 `gh-release.bat` —— 它把**当前提交（HEAD）**打上 `v<版本>` 标签并上传根目录的 `cedinia-<版本>.apk`；`gh-release.bat check` 是只读预检（只打印将执行的命令），也可用 `gh-release.bat <标签> <apk路径>` 显式指定；相关日志在 `build\logs\gh-release_<时间戳>.log`
 
 除 `build clean` 外，也可直接运行 `clean.bat`：默认清理编译产物与输出文件，`clean all` 额外清理 Gradle/Cargo 缓存，另有 `clean rust` / `clean android` / `clean logs` 可选。清理范围包括根目录的 APK/AAB 及其 `.idsig` 签名、`target\{debug,release}\apk\` 下 cargo apk 的中间产物。
 

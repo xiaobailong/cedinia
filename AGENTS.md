@@ -29,22 +29,33 @@ fn android_main(android_app: AndroidApp) {
 Logging: on Android `android_logger` would grab the single global `log` slot, so
 czkawka_core's file `WriteLogger` never installs. `app.rs::setup_android_logger` installs a
 `DualLogger` fanning out to BOTH the `AndroidLogger` (logcat) and an appended file log, so
-log export has real content. Desktop keeps `czkawka_core::setup_logger`.
+log export has real content. Desktop installs `czkawka_core::setup_logger` the same way, but
+late (`app.rs::install_desktop_logger`) - see the switch below.
 
 Log file location and retention (`src/logging.rs`): one file per day, named
 `cedinia_<YYYY-MM-DD>.log`. On Android it lives in the user-visible
 `/storage/emulated/0/Download/cedinia/`; until the user grants `MANAGE_EXTERNAL_STORAGE`
 that folder is not writable, so the logger falls back to `$CACHE_DIR` and the permission
-poll re-opens the Downloads file (`logging::android::retarget_log_file()`) as soon as access
-is granted. `app.rs::prune_stale_logs()` deletes log files untouched for more than 7 days
-from both folders at startup - age comes from the timestamp, not the file name, so a file
-still being appended to survives. Log export reads both folders.
+poll re-opens the Downloads file (`logging::open_log_file()`) as soon as access is granted.
+`app.rs::prune_stale_logs()` deletes log files untouched for more than 7 days from both
+folders at startup - age comes from the timestamp, not the file name, so a file still being
+appended to survives. Log export reads both folders. Resolving
+`logging::android::download_log_dir()` never touches the file system; the folder is created
+only by `logging::android::create_download_log_dir()`, which the log file open path is the
+only caller of.
 
 Logging switch: the "Enable logging" setting flips `log::set_max_level(Off)` via
 `logging::set_logging_enabled()`. It is a *process-wide* gate, so it silences every
-`log::*!` site at once (czkawka_core included), not just cedinia's own. It is applied from
-`load_settings()` - i.e. before the first log line of the session - and again from every
-`save_settings()` call, keeping the runtime state in step with the persisted flag.
+`log::*!` site at once (czkawka_core included), not just cedinia's own. The switch owns the
+log *file* too, because opening one is what creates it (and, on Android, the
+`Download/cedinia` folder) and czkawka_core builds the file while its logger is created: a
+session with logging off installs no logger on desktop, opens no file on Android, and
+`logging::android::download_log_dir()` in the export/prune walks leaves the folder alone.
+Order matters - `setup_logger_cache()` applies `settings::load_logging_enabled_flag()` (a
+peek at just this flag) *before* installing the logger, `logging::apply_log_level()` re-applies
+the state after an install (installing a logger resets the facade's max level), and every
+`save_settings()` call re-applies it so flipping the toggle takes effect immediately.
+Flipping it also runs the log file hooks: off releases the file handle, on re-opens it.
 Log levels at the call sites: user-visible actions and lifecycle events use `info!`
 (scan start/stop, delete start/finish, opening a compare group, opening a dialog,
 permission changes), per-image or otherwise verbose detail uses `debug!` (score edits,
@@ -88,7 +99,8 @@ cedinia/src/
 ├── volumes.rs                     # Storage volume detection
 ├── localizer_cedinia.rs           # flc! macro, LANGUAGE_LIST, apply_language_preference()
 ├── file_picker_android.rs         # JNI + embedded DEX file picker
-├── logging.rs                     # set_logging_enabled() - global Off/on gate for the `log` facade,
+├── logging.rs                     # set_logging_enabled() - global Off/on gate for the `log` facade
+│                                  #   + the log file/logger lifecycle it drives,
 │                                  #   Android log folder (Download/cedinia) + 7 day retention
 ├── callbacks/
 │   ├── callbacks.rs               # Module re-exports

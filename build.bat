@@ -887,6 +887,11 @@ for %%d in ("target\debug\apk" "target\release\apk") do (
     )
 )
 del /q "build\build_full.log" "build\build_exit.log" 2>nul
+REM Cline 的临时产物（见 .clinerules/tmp-files.md）：根目录 tmp\ 整目录删除
+if exist "tmp" (
+    rmdir /s /q "tmp" 2>nul
+    echo       tmp\ ^(Cline 临时产物^) 已删除
+)
 echo       清理完成（target/release/ 已保留）。
 goto :end
 
