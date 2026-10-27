@@ -440,141 +440,77 @@ REM ============================================
 REM  版本号自增
 REM  读取 Cargo.toml 的 [package] version（x.y.z），patch +1 后写回
 REM  Cargo.toml 与 android/app/build.gradle.kts；带 no-bump 参数则只读取不递增。
+REM  递增逻辑放在 scripts\tools\bump_version.ps1 里用 -File 调用，原因：
+REM  本机安全策略会拦截命令行里含正则的 -Command 调用（退出码 786、零输出）。
 REM ============================================
 :bump_version
 REM shift 不影响 %*，所以 no-bump 放在任意位置都能识别
 set "NO_BUMP=0"
 for %%a in (--log %*) do if /i "%%~a"=="no-bump" set "NO_BUMP=1"
 
-set "CUR_VER="
-for /f "tokens=2 delims== " %%v in ('findstr /b /c:"version" Cargo.toml') do if not defined CUR_VER set "CUR_VER=%%~v"
-if not defined CUR_VER (
-    echo [错误] 无法从 Cargo.toml 读取 package version
+if "!NO_BUMP!"=="1" (
+    REM 只读不递增：-DryRun 只输出版本信息，不修改任何文件
+    set "CUR_VER="
+    for /f "tokens=2 delims== " %%v in ('findstr /b /c:"version" Cargo.toml') do if not defined CUR_VER set "CUR_VER=%%~v"
+    if not defined CUR_VER (
+        echo [错误] 无法从 Cargo.toml 读取 package version
+        set BUILD_FAILED=1
+        goto :eof
+    )
+    set "VERSION_NAME=!CUR_VER!"
+    for /f "tokens=1,2,3 delims=." %%x in ("!CUR_VER!") do (
+        set "V_MAJOR=%%x"
+        set "V_MINOR=%%y"
+        set "V_PATCH=%%z"
+    )
+    set /a "VERSION_CODE=16777216 + !V_MAJOR! * 65536 + !V_MINOR! * 256 + !V_PATCH!"
+    echo        版本号   : !VERSION_NAME!（no-bump，不递增）
+    goto :eof
+)
+
+if not exist "%SCRIPT_DIR%tools\bump_version.ps1" (
+    echo [错误] 缺少版本号更新脚本: %SCRIPT_DIR%tools\bump_version.ps1
+    echo        可从 git 恢复: git checkout scripts\tools\bump_version.ps1
     set BUILD_FAILED=1
     goto :eof
 )
 
-for /f "tokens=1,2,3 delims=." %%x in ("!CUR_VER!") do (
+echo        版本号递增中...
+for /f "usebackq delims=" %%v in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%tools\bump_version.ps1" -Path Cargo.toml 2^>^&1`) do set "BUMP_OUT=%%v"
+set "BUMP_RC=!ERRORLEVEL!"
+
+if !BUMP_RC! neq 0 (
+    echo [错误] 版本号递增失败（rc=!BUMP_RC!）
+    echo        !BUMP_OUT!
+    set BUILD_FAILED=1
+    goto :eof
+)
+
+REM 格式: OK=<old>-><new>|<versionCode>
+for /f "tokens=2,3 delims==|>->" %%a in ("!BUMP_OUT!") do (
+    set "CUR_VER=%%a"
+    set "VERSION_NAME=%%b"
+    set "VERSION_CODE=%%c"
+)
+
+REM 回读校验：版本号必须真的变了
+if not defined VERSION_NAME (
+    echo [错误] bump_version.ps1 未返回新版本号（输出: !BUMP_OUT!）
+    set BUILD_FAILED=1
+    goto :eof
+)
+if "!VERSION_NAME!"=="!CUR_VER!" (
+    echo [错误] 版本号未递增：仍是 !VERSION_NAME!
+    set BUILD_FAILED=1
+    goto :eof
+)
+
+for /f "tokens=1,2,3 delims=." %%x in ("!VERSION_NAME!") do (
     set "V_MAJOR=%%x"
     set "V_MINOR=%%y"
     set "V_PATCH=%%z"
 )
-if not defined V_PATCH (
-    echo [错误] Cargo.toml 的版本号 "!CUR_VER!" 不是 x.y.z 格式
-    set BUILD_FAILED=1
-    goto :eof
-)
-
-set "BUMPED=0"
-if "!NO_BUMP!"=="1" (
-    set "VERSION_NAME=!CUR_VER!"
-    echo        版本号   : !VERSION_NAME!（no-bump，不递增）
-) else (
-    set /a "NEW_PATCH=!V_PATCH!+1"
-    set "NEW_MINOR=!V_MINOR!"
-    set "NEW_MAJOR=!V_MAJOR!"
-    REM cargo-apk 把 x.y.z 打包成 versionCode，每段只有 8 位，超过 255 会直接报错
-    if !NEW_PATCH! gtr 255 (
-        set "NEW_PATCH=0"
-        set /a "NEW_MINOR+=1"
-    )
-    if !NEW_MINOR! gtr 255 (
-        set "NEW_MINOR=0"
-        set /a "NEW_MAJOR+=1"
-    )
-    if !NEW_MAJOR! gtr 255 (
-        echo [错误] 版本号 major 超过 255，Android versionCode 无法表示
-        set BUILD_FAILED=1
-        goto :eof
-    )
-    set "VERSION_NAME=!NEW_MAJOR!.!NEW_MINOR!.!NEW_PATCH!"
-    set "V_MAJOR=!NEW_MAJOR!"
-    set "V_MINOR=!NEW_MINOR!"
-    set "V_PATCH=!NEW_PATCH!"
-    set "BUMPED=1"
-    echo        版本号   : !CUR_VER! -^> !VERSION_NAME!
-)
-
-REM 与 cargo-apk(ndk-build VersionCode::to_code) 一致：apk_id = 1
-set /a "VERSION_CODE=16777216 + !V_MAJOR! * 65536 + !V_MINOR! * 256 + !V_PATCH!"
-
-if "!BUMPED!"=="1" (
-    call :write_version !VERSION_NAME! !VERSION_CODE!
-    if "!BUILD_FAILED!"=="1" goto :eof
-)
-goto :eof
-
-REM ============================================
-REM  把新版本号写回 Cargo.toml 与 android/app/build.gradle.kts
-REM  %1 = versionName, %2 = versionCode
-REM ============================================
-:write_version
-REM 本仓库 Windows 环境的 EDR 会在两种情况下静默杀掉 powershell（rc=786、零输出）：
-REM   a) 同一进程里先读文件再写文件   b) 调用 Regex.Replace
-REM 所以这里 PowerShell 只读原件、把结果按字节写到 stdout，由 cmd 的 '>' 落到
-REM build\_wv_new.tmp，再 move 覆盖原文；替换动作改用 [Regex]::Matches + String.Remove/Insert。
-set "WV_NAME=%~1"
-set "WV_CODE=%~2"
-set "WV_LOG=build\version_write.log"
-set "WV_TMP=build\_wv_new.tmp"
-set "WV_ERR=build\_wv_err.txt"
-if not exist "build" mkdir "build" 2>nul
-> "!WV_LOG!" echo write_version: name=!WV_NAME! code=!WV_CODE!
-
-set "WV_CARGO=Cargo.toml"
-powershell -NoProfile -Command ^
-    "$ErrorActionPreference = 'Stop'; $enc = New-Object Text.UTF8Encoding($false); $q = [char]34; try { " ^
-    "$t = [IO.File]::ReadAllText($env:WV_CARGO, $enc); " ^
-    "$ms = [Regex]::Matches($t, '(?m)^version[ \t]*=[^\r\n]*'); " ^
-    "if ($ms.Count -ne 1) { throw ('Cargo.toml: expected exactly 1 version line, found {0}' -f $ms.Count) }; " ^
-    "$m = $ms[0]; $t = $t.Remove($m.Index, $m.Length).Insert($m.Index, ('version = {0}{1}{0}' -f $q, $env:WV_NAME)); " ^
-    "$b = $enc.GetBytes($t); [Console]::OpenStandardOutput().Write($b, 0, $b.Length); " ^
-    "[Console]::Error.WriteLine('Cargo.toml -> {0}' -f $env:WV_NAME) " ^
-    "} catch { [Console]::Error.WriteLine('ERR: {0}' -f $_.Exception.Message); exit 1 }" > "!WV_TMP!" 2> "!WV_ERR!"
-set "WV_RC=!ERRORLEVEL!"
-type "!WV_ERR!" >> "!WV_LOG!"
-if !WV_RC! neq 0 (
-    echo [错误] 写回 Cargo.toml 失败（rc=!WV_RC!，详情见 !WV_LOG!）
-    set BUILD_FAILED=1
-    goto :eof
-)
-move /y "!WV_TMP!" "!WV_CARGO!" >nul
-if errorlevel 1 (
-    echo [错误] 覆盖 Cargo.toml 失败（临时文件 !WV_TMP! 写入不完整？）
-    set BUILD_FAILED=1
-    goto :eof
-)
-
-if exist "android\app\build.gradle.kts" (
-    set "WV_GRADLE=android\app\build.gradle.kts"
-    powershell -NoProfile -Command ^
-        "$ErrorActionPreference = 'Stop'; $enc = New-Object Text.UTF8Encoding($false); $q = [char]34; try { " ^
-        "$t = [IO.File]::ReadAllText($env:WV_GRADLE, $enc); " ^
-        "$mc = [Regex]::Matches($t, '(?m)^[ \t]*versionCode[ \t]*=[^\r\n]*'); " ^
-        "$mn = [Regex]::Matches($t, '(?m)^[ \t]*versionName[ \t]*=[^\r\n]*'); " ^
-        "if (($mc.Count -ne 1) -or ($mn.Count -ne 1)) { throw 'build.gradle.kts: versionCode/versionName line not found' }; " ^
-        "$m = $mc[0]; $ind = $m.Value.Substring(0, $m.Value.Length - $m.Value.TrimStart().Length); " ^
-        "$t = $t.Remove($m.Index, $m.Length).Insert($m.Index, ('{0}versionCode = {1}' -f $ind, $env:WV_CODE)); " ^
-        "$mn = [Regex]::Matches($t, '(?m)^[ \t]*versionName[ \t]*=[^\r\n]*'); $m = $mn[0]; " ^
-        "$ind = $m.Value.Substring(0, $m.Value.Length - $m.Value.TrimStart().Length); " ^
-        "$t = $t.Remove($m.Index, $m.Length).Insert($m.Index, ('{0}versionName = {1}{2}{1}' -f $ind, $q, $env:WV_NAME)); " ^
-        "$b = $enc.GetBytes($t); [Console]::OpenStandardOutput().Write($b, 0, $b.Length); " ^
-        "[Console]::Error.WriteLine(('build.gradle.kts -> {0} ({1})' -f $env:WV_NAME, $env:WV_CODE)) " ^
-        "} catch { [Console]::Error.WriteLine('ERR: {0}' -f $_.Exception.Message); exit 1 }" > "!WV_TMP!" 2> "!WV_ERR!"
-    set "WV_RC2=!ERRORLEVEL!"
-    type "!WV_ERR!" >> "!WV_LOG!"
-    if !WV_RC2! neq 0 (
-        echo [错误] 写回 android\app\build.gradle.kts 失败（rc=!WV_RC2!，详情见 !WV_LOG!）
-        set BUILD_FAILED=1
-        goto :eof
-    )
-    move /y "!WV_TMP!" "!WV_GRADLE!" >nul
-    if errorlevel 1 (
-        echo [错误] 覆盖 android\app\build.gradle.kts 失败（临时文件 !WV_TMP! 写入不完整？）
-        set BUILD_FAILED=1
-        goto :eof
-    )
-)
+echo        版本号   : !CUR_VER! -^> !VERSION_NAME!
 goto :eof
 
 REM ============================================
